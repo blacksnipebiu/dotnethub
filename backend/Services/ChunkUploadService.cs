@@ -75,15 +75,15 @@ public class ChunkUploadService
             ZipArchive? archive = null;
             try
             {
-                archive = new ZipArchive(ms, ZipArchiveMode.Read, false, Encoding.UTF8);
-                if (archive.Entries.Any(e => e.Name.Contains('�')))
+                archive = new ZipArchive(ms, ZipArchiveMode.Read, true, Encoding.UTF8);
+                if (archive.Entries.Any(e => e.Name.Contains('\ufffd')))
                     throw new Exception("Encoding mismatch");
             }
             catch
             {
                 archive?.Dispose();
                 ms.Position = 0;
-                archive = new ZipArchive(ms, ZipArchiveMode.Read, false, Encoding.GetEncoding(936));
+                archive = new ZipArchive(ms, ZipArchiveMode.Read, true, Encoding.GetEncoding(936));
             }
             using (archive)
             {
