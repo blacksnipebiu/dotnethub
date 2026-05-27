@@ -93,6 +93,7 @@ public class ProjectsController : ControllerBase
     
     [Authorize]
     [HttpPost("{id}/upload")]
+    [RequestSizeLimit(300_000_000)]  // 300 MB
     public async Task<ActionResult> Upload(int id, [FromForm] IFormFileCollection files)
     {
         try

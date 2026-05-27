@@ -8,6 +8,13 @@ using DotNetHub.Server.Services;
 
 var builder = WebApplication.CreateBuilder(args);
 
+// Increase request size limit for file uploads (default is 30 MB)
+builder.WebHost.ConfigureKestrel(o => o.Limits.MaxRequestBodySize = 300_000_000); // 300 MB
+builder.Services.Configure<Microsoft.AspNetCore.Http.Features.FormOptions>(o =>
+{
+    o.MultipartBodyLengthLimit = 300_000_000; // 300 MB
+});
+
 // Database
 var dbConnectionString = builder.Configuration.GetConnectionString("Default")
     ?? "Data Source=dotnethub.db";
