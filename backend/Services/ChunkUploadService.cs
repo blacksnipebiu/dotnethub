@@ -91,51 +91,18 @@ public class ChunkUploadService
         catch (Exception ex) { _logger.LogError(ex, "[Combine] Step3 FAILED"); throw; }
         _logger.LogInformation("[Combine] Step3 — read {ByteCount} bytes OK", zipBytes.Length);
         
-        // Step 4: Open MemoryStream and detect encoding
-        _logger.LogInformation("[Combine] Step4 — detecting encoding");
+        // Step 4: Extract with UTF-8 encoding
+        _logger.LogInformation("[Combine] Step4 — extracting with UTF-8 encoding");
         using (var ms = new MemoryStream(zipBytes))
+        using (var archive = new ZipArchive(ms, ZipArchiveMode.Read, true, Encoding.UTF8))
         {
-            _logger.LogInformation("[Combine]   ms.CanRead={CanRead}, ms.Length={Length}", ms.CanRead, ms.Length);
-            ZipArchive? archive = null;
-            try
-            {
-                _logger.LogInformation("[Combine]   trying UTF-8...");
-                archive = new ZipArchive(ms, ZipArchiveMode.Read, true, Encoding.UTF8);
-                var hasGarbled = archive.Entries.Any(e => e.Name.Contains('\ufffd'));
-                _logger.LogInformation("[Combine]   UTF-8 OK, entries={Count}, hasGarbled={Garbled}", 
-                    archive.Entries.Count, hasGarbled);
-                if (hasGarbled) throw new Exception("Encoding mismatch");
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex, "[Combine]   UTF-8 failed ({Msg}), trying GBK...", ex.Message);
-                archive?.Dispose();
-                _logger.LogInformation("[Combine]   after dispose: ms.CanRead={CanRead}", ms.CanRead);
-                ms.Position = 0;
-                _logger.LogInformation("[Combine]   ms.Position reset OK, creating GBK archive...");
-                archive = new ZipArchive(ms, ZipArchiveMode.Read, true, Encoding.GetEncoding(936));
-                _logger.LogInformation("[Combine]   GBK OK, entries={Count}", archive.Entries.Count);
-            }
-            
-            // Step 5: Extract
-            _logger.LogInformation("[Combine] Step5 — extracting to {ProjectPath}", projectPath);
-            try
-            {
-                using (archive)
-                {
-                    archive.ExtractToDirectory(projectPath, true);
-                }
-                _logger.LogInformation("[Combine] Step5 — extract OK");
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "[Combine] Step5 EXTRACT FAILED");
-                throw;
-            }
+            _logger.LogInformation("[Combine]   entries={Count}", archive.Entries.Count);
+            archive.ExtractToDirectory(projectPath, true);
         }
-        
-        // Step 6: Clean up
-        _logger.LogInformation("[Combine] Step6 — deleting zip {ZipPath}", zipPath);
+        _logger.LogInformation("[Combine] Step4 — extract OK");
+
+        // Step 5: Clean up zip
+        _logger.LogInformation("[Combine] Step5 — deleting zip {ZipPath}", zipPath);
         File.Delete(zipPath);
         
         _logger.LogInformation("[Combine] DONE successfully");
