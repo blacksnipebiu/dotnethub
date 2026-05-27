@@ -2,6 +2,7 @@
 using System.Diagnostics;
 using System.IO.Compression;
 using System.Runtime.InteropServices;
+using System.Text;
 using Microsoft.EntityFrameworkCore;
 using DotNetHub.Server.Data;
 using DotNetHub.Server.Models;
@@ -142,8 +143,26 @@ public class ProjectService
             if (file.FileName.EndsWith(".zip"))
             {
                 using var stream = file.OpenReadStream();
-                using var archive = new ZipArchive(stream);
-                archive.ExtractToDirectory(extractPath, true);
+                // Try UTF-8 first, fall back to GBK for Chinese Windows zips
+                ZipArchive? archive = null;
+                try
+                {
+                    archive = new ZipArchive(stream, ZipArchiveMode.Read, false, Encoding.UTF8);
+                    // Check if any entry name has replacement chars (encoding mismatch)
+                    if (archive.Entries.Any(e => e.Name.Contains('\ufffd')))
+                        throw new Exception("Encoding mismatch");
+                }
+                catch
+                {
+                    stream.Position = 0;
+                    archive?.Dispose();
+                    var gbk = Encoding.GetEncoding(936);
+                    archive = new ZipArchive(stream, ZipArchiveMode.Read, false, gbk);
+                }
+                using (archive)
+                {
+                    archive.ExtractToDirectory(extractPath, true);
+                }
             }
             else
             {

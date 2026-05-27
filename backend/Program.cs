@@ -6,6 +6,9 @@ using Microsoft.IdentityModel.Tokens;
 using DotNetHub.Server.Data;
 using DotNetHub.Server.Services;
 
+// Register code pages for GBK support (Chinese zip archives)
+Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
+
 var builder = WebApplication.CreateBuilder(args);
 
 // Increase request size limit for file uploads (default is 30 MB)
