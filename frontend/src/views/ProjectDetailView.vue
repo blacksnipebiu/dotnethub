@@ -5,6 +5,8 @@ import { useProjectsStore, type Project } from '../stores/projects'
 import { useAuthStore } from '../stores/auth'
 import api from '../api'
 
+const CHUNK_SIZE = 2 * 1024 * 1024 // 2MB per chunk
+
 const route = useRoute()
 const router = useRouter()
 const store = useProjectsStore()
@@ -26,6 +28,11 @@ const editingPort = ref(false)
 const portDraft = ref(0)
 const activeTab = ref<'files' | 'logs'>('files')
 
+// Upload progress
+const uploading = ref(false)
+const uploadProgress = ref(0)
+const uploadFileName = ref('')
+
 async function load() {
   try {
     const { data } = await api.get(`/projects/${route.params.id}`)
@@ -44,61 +51,109 @@ async function load() {
 async function loadFileTree() {
   try {
     fileTree.value = await store.getFileTree(Number(route.params.id))
-  } catch (e) {
-    fileTree.value = []
-  }
+  } catch (e) { fileTree.value = [] }
 }
 
 async function loadLogs() {
   try {
     const { data } = await api.get(`/projects/${route.params.id}/logs?lines=200`)
     logs.value = Array.isArray(data) ? data : []
-  } catch (e) {
-    logs.value = []
-  }
+  } catch (e) { logs.value = [] }
 }
 
 function startLogPolling() {
   stopLogPolling()
   logTimer.value = window.setInterval(loadLogs, 3000)
 }
-
 function stopLogPolling() {
   if (logTimer.value) { clearInterval(logTimer.value); logTimer.value = null }
 }
-
-async function upload() {
-  if (!fileInput.value?.files?.length || !project.value) return
-
-  // Check if project already has files
-  let mode = 'overwrite'
-  try {
-    const { data } = await api.get(`/projects/${project.value.id}/has-files`)
-    if (data.hasFiles) {
-      const choice = confirm(
-        '该项目已有文件，请选择更新方式：\n\n' +
-        '【确定】= 覆盖更新（保留同名文件，新增/替换不同文件）\n' +
-        '【取消】= 删除后更新（清空所有文件再解压）'
-      )
-      mode = choice ? 'overwrite' : 'delete'
-    }
-  } catch (e) { /* proceed with overwrite */ }
-
-  message.value = '上传中...'
-  try {
-    await store.uploadFiles(project.value.id, fileInput.value.files, mode)
-    message.value = '文件上传成功！'
-    await loadFileTree()
-    startFileTreePolling()
-  } catch (e: any) { error.value = '上传失败' }
-}
-
 function startFileTreePolling() {
   stopFileTreePolling()
   fileTreeTimer.value = window.setInterval(loadFileTree, 60000)
 }
 function stopFileTreePolling() {
   if (fileTreeTimer.value) { clearInterval(fileTreeTimer.value); fileTreeTimer.value = null }
+}
+
+// ---- Chunked upload ----
+async function upload() {
+  if (!fileInput.value?.files?.length || !project.value) return
+  const file = fileInput.value.files[0]
+  uploadFileName.value = file.name
+
+  // Determine overwrite mode
+  let mode = 'overwrite'
+  try {
+    const { data } = await api.get(`/projects/${project.value.id}/has-files`)
+    if (data.hasFiles) {
+      const choice = confirm(
+        '该项目已有文件，请选择更新方式：\n\n【确定】= 覆盖更新  【取消】= 清空后更新'
+      )
+      mode = choice ? 'overwrite' : 'delete'
+    }
+  } catch (e) { /* default overwrite */ }
+
+  uploading.value = true
+  uploadProgress.value = 0
+
+  const totalChunks = Math.ceil(file.size / CHUNK_SIZE)
+
+  // If 'delete' mode, clear first
+  if (mode === 'delete') {
+    try { await api.post(`/projects/${project.value.id}/upload-chunk/clear`) } catch (e) {}
+  }
+
+  // Check resume status
+  let startChunk = 0
+  try {
+    const { data } = await api.get(`/projects/${project.value.id}/upload-status`, {
+      params: { fileName: file.name, totalChunks }
+    })
+    if (data.receivedChunks && data.receivedChunks.length > 0 && !data.complete) {
+      const r = confirm(`检测到未完成的上传，已接收 ${data.receivedChunks.length}/${totalChunks} 块。\n【确定】= 继续上传  【取消】= 重新开始`)
+      if (r) {
+        startChunk = Math.min(...data.receivedChunks) > 0 ? Math.min(...data.receivedChunks) : 0
+      }
+    }
+  } catch (e) { /* start from 0 */ }
+
+  for (let i = startChunk; i < totalChunks; i++) {
+    const start = i * CHUNK_SIZE
+    const end = Math.min(start + CHUNK_SIZE, file.size)
+    const chunk = file.slice(start, end)
+    
+    const formData = new FormData()
+    formData.append('file', chunk, file.name)
+    formData.append('chunkIndex', String(i))
+    formData.append('totalChunks', String(totalChunks))
+    formData.append('fileName', file.name)
+
+    try {
+      await api.post(`/projects/${project.value.id}/upload-chunk`, formData)
+      uploadProgress.value = Math.round(((i + 1) / totalChunks) * 100)
+    } catch (e: any) {
+      error.value = `上传失败（块 ${i + 1}/${totalChunks}）：${e.response?.data?.message || e.message}`
+      uploading.value = false
+      return
+    }
+  }
+
+  uploading.value = false
+  message.value = `上传完成！正在解压...`
+
+  // Trigger combine & extract
+  try {
+    await api.post(`/projects/${project.value.id}/upload-chunk/combine`, {
+      fileName: file.name,
+      totalChunks
+    })
+    message.value = '上传并解压成功！'
+    await loadFileTree()
+    startFileTreePolling()
+  } catch (e: any) {
+    error.value = '解压失败：' + (e.response?.data?.message || '')
+  }
 }
 
 async function build() {
@@ -108,9 +163,7 @@ async function build() {
     await store.buildProject(project.value.id)
     message.value = '构建成功！'
     await load()
-  } catch (e: any) {
-    message.value = '构建失败：' + (e.response?.data?.message || '')
-  }
+  } catch (e: any) { message.value = '构建失败：' + (e.response?.data?.message || '') }
 }
 
 async function deploy() {
@@ -121,9 +174,7 @@ async function deploy() {
     message.value = '部署成功！'
     await load()
     startLogPolling()
-  } catch (e: any) {
-    message.value = '部署失败：' + (e.response?.data?.message || '')
-  }
+  } catch (e: any) { message.value = '部署失败：' + (e.response?.data?.message || '') }
 }
 
 async function stop() {
@@ -220,12 +271,24 @@ onUnmounted(() => { stopLogPolling(); stopFileTreePolling() })
     <!-- 🔧 操作按钮 -->
     <div v-if="canManage()" class="card mt-16">
       <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
-        <input ref="fileInput" type="file" multiple accept=".zip,.cs,.csproj,.sln,.json,.cshtml" style="display:none" @change="upload" />
-        <button class="btn btn-outline btn-sm" @click="fileInput?.click()">📁 上传文件</button>
+        <input ref="fileInput" type="file" accept=".zip" style="display:none" @change="upload" />
+        <button class="btn btn-outline btn-sm" :disabled="uploading" @click="fileInput?.click()">
+          {{ uploading ? '上传中...' : '📁 上传文件' }}
+        </button>
         <button class="btn btn-outline btn-sm" @click="build">🔨 构建</button>
         <button class="btn btn-success btn-sm" @click="deploy">🚀 部署</button>
         <button class="btn btn-error btn-sm" @click="stop">⏹ 停止</button>
         <button class="btn btn-error btn-sm" @click="del" style="margin-left:auto">🗑 删除</button>
+      </div>
+      <!-- Upload progress -->
+      <div v-if="uploading" style="margin-top:12px">
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">
+          <span style="font-size:0.85rem">上传中: {{ uploadFileName }}</span>
+          <span style="font-size:0.8rem;color:var(--primary);font-weight:600">{{ uploadProgress }}%</span>
+        </div>
+        <div style="background:var(--border);height:6px;border-radius:3px;overflow:hidden">
+          <div :style="{ width: uploadProgress + '%', height: '100%', background: 'var(--primary)', transition: 'width 0.3s' }"></div>
+        </div>
       </div>
     </div>
 
@@ -239,8 +302,7 @@ onUnmounted(() => { stopLogPolling(); stopFileTreePolling() })
           </span>
         </div>
         <div v-if="project.processId">
-          <strong>进程 PID</strong><br>
-          <code style="font-size:1rem">{{ project.processId }}</code>
+          <strong>进程 PID</strong><br><code style="font-size:1rem">{{ project.processId }}</code>
         </div>
         <div>
           <strong>端口</strong><br>
@@ -269,9 +331,6 @@ onUnmounted(() => { stopLogPolling(); stopFileTreePolling() })
         <h3>⚙️ 部署指令</h3>
         <button v-if="!editingArgs" class="btn btn-outline btn-sm" @click="editingArgs = true">编辑</button>
       </div>
-      <p style="color:var(--text-muted);font-size:0.82rem;margin-bottom:8px">
-        自定义启动参数，留空则使用默认端口 <code>--urls http://0.0.0.0:{{ project.port }}</code>
-      </p>
       <div v-if="editingArgs">
         <textarea v-model="startupArgsDraft" class="form-input" rows="2" placeholder="--urls http://0.0.0.0:5000" style="font-family:monospace;font-size:0.85rem"></textarea>
         <div style="display:flex;gap:8px;margin-top:8px">
@@ -284,23 +343,19 @@ onUnmounted(() => { stopLogPolling(); stopFileTreePolling() })
       </div>
     </div>
 
-    <!-- TabGroup: 文件结构 | 运行日志 -->
+    <!-- TabGroup -->
     <div class="card mt-16">
       <div class="tab-bar">
         <button :class="['tab-btn', activeTab === 'files' ? 'tab-active' : '']" @click="activeTab = 'files'">📂 文件结构</button>
         <button :class="['tab-btn', activeTab === 'logs' ? 'tab-active' : '']" @click="activeTab = 'logs'">📋 运行日志</button>
       </div>
 
-      <!-- 文件结构 -->
       <div v-if="activeTab === 'files'" style="margin-top:12px">
-        <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px">
-          <button class="btn btn-outline btn-sm" @click="loadFileTree">🔄 刷新文件树</button>
-        </div>
+        <button class="btn btn-outline btn-sm" style="margin-bottom:8px" @click="loadFileTree">🔄 刷新文件树</button>
         <pre v-if="fileTree.length > 0" style="background:var(--code-bg);padding:16px;border-radius:8px;font-size:0.85rem;line-height:1.6;overflow-x:auto;margin:0;white-space:pre;font-family:monospace">{{ renderTree(fileTree) }}</pre>
         <div v-else style="text-align:center;padding:40px;color:var(--text-muted)">暂无文件，请先上传项目文件</div>
       </div>
 
-      <!-- 运行日志 -->
       <div v-if="activeTab === 'logs'" style="margin-top:12px">
         <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px">
           <button class="btn btn-outline btn-sm" @click="loadLogs">🔄 刷新日志</button>
@@ -315,30 +370,8 @@ onUnmounted(() => { stopLogPolling(); stopFileTreePolling() })
 </template>
 
 <style scoped>
-.tab-bar {
-  display: flex;
-  gap: 0;
-  border-bottom: 2px solid var(--border);
-  margin-bottom: 0;
-}
-
-.tab-btn {
-  padding: 10px 20px;
-  background: none;
-  border: none;
-  border-bottom: 2px solid transparent;
-  color: var(--text-muted);
-  font-size: 0.9rem;
-  cursor: pointer;
-  transition: all 0.2s;
-  margin-bottom: -2px;
-}
-
+.tab-bar { display: flex; border-bottom: 2px solid var(--border); }
+.tab-btn { padding: 10px 20px; background: none; border: none; border-bottom: 2px solid transparent; color: var(--text-muted); font-size: 0.9rem; cursor: pointer; margin-bottom: -2px; }
 .tab-btn:hover { color: var(--text); }
-
-.tab-active {
-  color: var(--primary);
-  border-bottom-color: var(--primary);
-  font-weight: 600;
-}
+.tab-active { color: var(--primary); border-bottom-color: var(--primary); font-weight: 600; }
 </style>

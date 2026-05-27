@@ -46,6 +46,7 @@ builder.Services.AddAuthorization();
 // Services
 builder.Services.AddScoped<AuthService>();
 builder.Services.AddScoped<ProjectService>();
+builder.Services.AddScoped<ChunkUploadService>();
 
 // CORS
 builder.Services.AddCors(options =>
