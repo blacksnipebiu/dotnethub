@@ -50,51 +50,95 @@ public class ChunkUploadService
     
     public async Task<string> CombineAndExtract(string projectPath, string fileName, string projectName, int totalChunks)
     {
+        _logger.LogInformation("[Combine] START — path={ProjectPath}, file={FileName}, chunks={TotalChunks}", 
+            projectPath, fileName, totalChunks);
+        
         var chunkDir = Path.Combine(projectPath, "_chunks", SanitizeFileName(fileName));
         var zipPath = Path.Combine(projectPath, projectName + ".zip");
         
-        // Combine chunks
-        using (var fs = File.Create(zipPath))
+        // Step 1: Combine chunks
+        _logger.LogInformation("[Combine] Step1 — combining {TotalChunks} chunks into {ZipPath}", totalChunks, zipPath);
+        try
         {
-            for (int i = 0; i < totalChunks; i++)
+            using (var fs = File.Create(zipPath))
             {
-                var chunkFile = Path.Combine(chunkDir, $"part_{i:D6}");
-                if (!File.Exists(chunkFile))
-                    throw new FileNotFoundException($"缺少分块 {i}");
-                using var cf = File.OpenRead(chunkFile);
-                await cf.CopyToAsync(fs);
+                for (int i = 0; i < totalChunks; i++)
+                {
+                    var chunkFile = Path.Combine(chunkDir, $"part_{i:D6}");
+                    _logger.LogDebug("[Combine]   chunk {Index}: {ChunkFile} exists={Exists}", i, chunkFile, File.Exists(chunkFile));
+                    if (!File.Exists(chunkFile))
+                        throw new FileNotFoundException($"缺少分块 {i}");
+                    using var cf = File.OpenRead(chunkFile);
+                    await cf.CopyToAsync(fs);
+                }
             }
+            _logger.LogInformation("[Combine] Step1 — combined OK, zip size={Size}", new FileInfo(zipPath).Length);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "[Combine] Step1 FAILED");
+            throw;
         }
         
-        // Clean chunks directory
+        // Step 2: Clean chunks
+        _logger.LogInformation("[Combine] Step2 — deleting chunk dir {ChunkDir}", chunkDir);
         Directory.Delete(chunkDir, true);
         
-        // Extract with encoding detection
-        using (var ms = new MemoryStream(await File.ReadAllBytesAsync(zipPath)))
+        // Step 3: Read zip into memory
+        _logger.LogInformation("[Combine] Step3 — reading zip into memory");
+        byte[] zipBytes;
+        try { zipBytes = await File.ReadAllBytesAsync(zipPath); }
+        catch (Exception ex) { _logger.LogError(ex, "[Combine] Step3 FAILED"); throw; }
+        _logger.LogInformation("[Combine] Step3 — read {ByteCount} bytes OK", zipBytes.Length);
+        
+        // Step 4: Open MemoryStream and detect encoding
+        _logger.LogInformation("[Combine] Step4 — detecting encoding");
+        using (var ms = new MemoryStream(zipBytes))
         {
+            _logger.LogInformation("[Combine]   ms.CanRead={CanRead}, ms.Length={Length}", ms.CanRead, ms.Length);
             ZipArchive? archive = null;
             try
             {
+                _logger.LogInformation("[Combine]   trying UTF-8...");
                 archive = new ZipArchive(ms, ZipArchiveMode.Read, true, Encoding.UTF8);
-                if (archive.Entries.Any(e => e.Name.Contains('\ufffd')))
-                    throw new Exception("Encoding mismatch");
+                var hasGarbled = archive.Entries.Any(e => e.Name.Contains('\ufffd'));
+                _logger.LogInformation("[Combine]   UTF-8 OK, entries={Count}, hasGarbled={Garbled}", 
+                    archive.Entries.Count, hasGarbled);
+                if (hasGarbled) throw new Exception("Encoding mismatch");
             }
-            catch
+            catch (Exception ex)
             {
+                _logger.LogWarning(ex, "[Combine]   UTF-8 failed ({Msg}), trying GBK...", ex.Message);
                 archive?.Dispose();
+                _logger.LogInformation("[Combine]   after dispose: ms.CanRead={CanRead}", ms.CanRead);
                 ms.Position = 0;
+                _logger.LogInformation("[Combine]   ms.Position reset OK, creating GBK archive...");
                 archive = new ZipArchive(ms, ZipArchiveMode.Read, true, Encoding.GetEncoding(936));
+                _logger.LogInformation("[Combine]   GBK OK, entries={Count}", archive.Entries.Count);
             }
-            using (archive)
+            
+            // Step 5: Extract
+            _logger.LogInformation("[Combine] Step5 — extracting to {ProjectPath}", projectPath);
+            try
             {
-                archive.ExtractToDirectory(projectPath, true);
+                using (archive)
+                {
+                    archive.ExtractToDirectory(projectPath, true);
+                }
+                _logger.LogInformation("[Combine] Step5 — extract OK");
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "[Combine] Step5 EXTRACT FAILED");
+                throw;
             }
         }
         
-        // Delete zip after extraction
+        // Step 6: Clean up
+        _logger.LogInformation("[Combine] Step6 — deleting zip {ZipPath}", zipPath);
         File.Delete(zipPath);
         
-        _logger.LogInformation("Chunks combined and extracted for {FileName}", fileName);
+        _logger.LogInformation("[Combine] DONE successfully");
         return zipPath;
     }
     
