@@ -172,7 +172,6 @@ public class ProjectsController : ControllerBase
     
     [Authorize]
     [HttpGet("{id}/files")]
-    [Produces("application/json; charset=utf-8")]
     public async Task<ActionResult> GetFiles(int id)
     {
         var project = await _projectService.GetById(id);

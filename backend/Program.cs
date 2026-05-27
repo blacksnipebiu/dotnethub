@@ -106,14 +106,16 @@ if (Directory.Exists(frontendRoot))
 {
     var fileProvider = new Microsoft.Extensions.FileProviders.PhysicalFileProvider(frontendRoot);
 
-    // Static files + SPA fallback — only for non-API routes
+    // Serve static files globally first (CSS, JS, images, etc.)
+    app.UseDefaultFiles(new DefaultFilesOptions { FileProvider = fileProvider });
+    app.UseStaticFiles(new StaticFileOptions { FileProvider = fileProvider });
+
+    // SPA fallback: only for non-API routes that don't match a static file
     app.MapWhen(ctx => !ctx.Request.Path.StartsWithSegments("/api"), spa =>
     {
-        spa.UseDefaultFiles(new DefaultFilesOptions { FileProvider = fileProvider });
-        spa.UseStaticFiles(new StaticFileOptions { FileProvider = fileProvider });
         spa.Run(async ctx =>
         {
-            ctx.Response.ContentType = "text/html";
+            ctx.Response.ContentType = "text/html; charset=utf-8";
             await ctx.Response.SendFileAsync(Path.Combine(frontendRoot, "index.html"));
         });
     });
