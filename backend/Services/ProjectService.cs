@@ -164,23 +164,35 @@ public class ProjectService
             await file.CopyToAsync(ms);
             zipBytes = ms.ToArray();
         }
+        _logger.LogInformation("[ZIP] file={File}, size={Size} bytes, trying encodings...", file.FileName, zipBytes.Length);
 
         Exception? lastException = null;
-        foreach (var encoding in encodingsToTry)
+        for (int ei = 0; ei < encodingsToTry.Length; ei++)
         {
+            var encoding = encodingsToTry[ei];
+            _logger.LogInformation("[ZIP] attempt {Idx}: encoding={Enc}", ei, encoding.EncodingName);
             try
             {
                 using var zipMs = new MemoryStream(zipBytes);
                 using var archive = new ZipArchive(zipMs, ZipArchiveMode.Read, true, encoding);
 
-                // Check for garbled characters (encoding mismatch)
-                var hasGarbled = archive.Entries.Any(e => 
-                    !string.IsNullOrEmpty(e.Name) && e.Name.Contains('\ufffd'));
-                if (hasGarbled) throw new InvalidOperationException("Encoding mismatch");
+                // Log first 10 entry names for debugging
+                var entries = archive.Entries.ToList();
+                var sampleNames = entries.Take(10).Select(e => $"Name='{e.Name}' FullName='{e.FullName}'").ToList();
+                _logger.LogInformation("[ZIP]   total entries={Total}, samples: {Samples}", entries.Count, string.Join("; ", sampleNames));
 
-                foreach (var entry in archive.Entries)
+                // Check for replacement characters (encoding mismatch)
+                var garbled = entries.Where(e => !string.IsNullOrEmpty(e.Name) && e.Name.Contains('\ufffd')).ToList();
+                if (garbled.Any())
                 {
-                    // Skip empty entries OR directory placeholders (trailing /)
+                    _logger.LogWarning("[ZIP]   found {Count} garbled names: {Names}", garbled.Count,
+                        string.Join(", ", garbled.Take(5).Select(e => e.Name)));
+                    throw new InvalidOperationException("Encoding mismatch — garbled characters detected");
+                }
+
+                int dirCount = 0, fileCount = 0;
+                foreach (var entry in entries)
+                {
                     var isDir = string.IsNullOrEmpty(entry.Name) || entry.FullName.EndsWith('/');
                     var destPath = Path.Combine(extractPath, entry.FullName);
                     var fullDest = Path.GetFullPath(destPath);
@@ -190,21 +202,26 @@ public class ProjectService
                     if (isDir)
                     {
                         Directory.CreateDirectory(fullDest);
+                        dirCount++;
                         continue;
                     }
 
                     var destDir = Path.GetDirectoryName(fullDest);
                     if (!string.IsNullOrEmpty(destDir)) Directory.CreateDirectory(destDir);
                     entry.ExtractToFile(fullDest, true);
+                    fileCount++;
                 }
+                _logger.LogInformation("[ZIP]   done: {Dirs} dirs, {Files} files extracted", dirCount, fileCount);
                 return;
             }
-            catch (Exception ex) when (!(ex is InvalidOperationException && ex.Message.Contains("路径遍历")))
+            catch (Exception ex) when (ex is not InvalidOperationException iex || !iex.Message.Contains("路径遍历"))
             {
+                _logger.LogWarning(ex, "[ZIP]   encoding {Enc} failed: {Msg}", encoding.EncodingName, ex.Message);
                 lastException = ex;
             }
         }
-        throw new InvalidOperationException($"解压失败: {lastException?.Message}", lastException);
+        _logger.LogError("[ZIP] all encodings failed. Last error: {Err}", lastException?.Message);
+        throw new InvalidOperationException($"解压失败（已尝试{encodingsToTry.Length}种编码）: {lastException?.Message}", lastException);
     }
 
     private async Task SaveSingleFileAsync(IFormFile file, string extractPath)
@@ -484,10 +501,13 @@ public class ProjectService
         var result = new List<FileNode>();
         if (!Directory.Exists(rootPath)) return result;
         
+        _logger.LogInformation("[TREE] scanning: {Path}", rootPath);
+        
         foreach (var dir in Directory.GetDirectories(rootPath))
         {
             var info = new DirectoryInfo(dir);
-            if (info.Name == ".git" || info.Name == "bin" || info.Name == "obj") continue;
+            if (info.Name == ".git" || info.Name == "bin" || info.Name == "obj" || info.Name == "_chunks") continue;
+            _logger.LogDebug("[TREE]   dir: {Name}", info.Name);
             result.Add(new FileNode
             {
                 Name = info.Name,
@@ -500,6 +520,7 @@ public class ProjectService
         foreach (var file in Directory.GetFiles(rootPath))
         {
             var info = new FileInfo(file);
+            _logger.LogDebug("[TREE]   file: {Name} ({Size} bytes)", info.Name, info.Length);
             result.Add(new FileNode
             {
                 Name = info.Name,
