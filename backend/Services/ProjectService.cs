@@ -129,6 +129,9 @@ public class ProjectService
         if (project == null) return false;
         if (project.UserId != userId && userRole != "admin")
             throw new UnauthorizedAccessException("Not authorized");
+
+        if (files == null || files.Count == 0)
+            throw new InvalidOperationException("没有选择任何文件");
         
         var extractPath = project.StoragePath;
         // Clear existing files if mode is "delete"
@@ -142,6 +145,7 @@ public class ProjectService
         {
             if (file.FileName.EndsWith(".zip"))
             {
+                try {
                 // Copy to MemoryStream so we can seek back if encoding mismatch
                 using var ms = new MemoryStream();
                 await file.CopyToAsync(ms);
@@ -164,6 +168,12 @@ public class ProjectService
                 using (archive)
                 {
                     archive.ExtractToDirectory(extractPath, true);
+                }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Zip extraction failed for project {Id}", id);
+                    throw new InvalidOperationException($"解压失败：{ex.Message}", ex);
                 }
             }
             else

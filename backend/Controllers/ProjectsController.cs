@@ -102,10 +102,8 @@ public class ProjectsController : ControllerBase
             if (!result) return NotFound();
             return Ok(new { message = "上传成功" });
         }
-        catch (UnauthorizedAccessException)
-        {
-            return Forbid();
-        }
+        catch (UnauthorizedAccessException) { return Forbid(); }
+        catch (InvalidOperationException ex) { return BadRequest(new { message = ex.Message }); }
     }
 
     [Authorize]
