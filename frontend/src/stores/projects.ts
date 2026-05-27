@@ -15,6 +15,16 @@ export interface Project {
   isPublic: boolean
   gitRepo: string | null
   ownerName: string | null
+  startupArgs: string
+  storagePath: string
+}
+
+export interface FileNode {
+  name: string
+  path: string
+  isDirectory: boolean
+  size: number
+  children: FileNode[] | null
 }
 
 export const useProjectsStore = defineStore('projects', () => {
@@ -67,6 +77,12 @@ export const useProjectsStore = defineStore('projects', () => {
     await api.post(`/projects/${id}/stop`)
   }
 
+  async function getFileTree(id: number): Promise<FileNode[]> {
+    const { data } = await api.get(`/projects/${id}/files`)
+    return data
+  }
+
   return { projects, loading, fetchProjects, createProject, updateProject, 
-           deleteProject, uploadFiles, buildProject, deployProject, stopProject }
+           deleteProject, uploadFiles, buildProject, deployProject, stopProject,
+           getFileTree }
 })

@@ -1,8 +1,7 @@
-
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { useProjectsStore, type Project } from '../stores/projects'
+import { useProjectsStore, type Project, type FileNode } from '../stores/projects'
 import { useAuthStore } from '../stores/auth'
 import api from '../api'
 
@@ -12,19 +11,34 @@ const store = useProjectsStore()
 const auth = useAuthStore()
 
 const project = ref<Project | null>(null)
+const fileTree = ref<FileNode[]>([])
 const loading = ref(true)
 const error = ref('')
 const message = ref('')
 const fileInput = ref<HTMLInputElement | null>(null)
 
+// Startup args editing
+const editingArgs = ref(false)
+const startupArgsDraft = ref('')
+
 async function load() {
   try {
     const { data } = await api.get(`/projects/${route.params.id}`)
     project.value = data
+    startupArgsDraft.value = data.startupArgs || ''
+    await loadFileTree()
   } catch (e: any) {
     error.value = '项目不存在'
   } finally {
     loading.value = false
+  }
+}
+
+async function loadFileTree() {
+  try {
+    fileTree.value = await store.getFileTree(Number(route.params.id))
+  } catch (e) {
+    fileTree.value = []
   }
 }
 
@@ -34,6 +48,7 @@ async function upload() {
   try {
     await store.uploadFiles(project.value.id, fileInput.value.files)
     message.value = '文件上传成功！'
+    await loadFileTree()
   } catch (e: any) {
     error.value = '上传失败'
   }
@@ -84,6 +99,38 @@ async function del() {
   }
 }
 
+async function saveStartupArgs() {
+  if (!project.value) return
+  try {
+    await store.updateProject(project.value.id, { startupArgs: startupArgsDraft.value })
+    project.value.startupArgs = startupArgsDraft.value
+    editingArgs.value = false
+    message.value = '启动参数已保存'
+  } catch (e: any) {
+    error.value = '保存失败'
+  }
+}
+
+function formatSize(bytes: number): string {
+  if (bytes < 1024) return bytes + ' B'
+  if (bytes < 1048576) return (bytes / 1024).toFixed(1) + ' KB'
+  return (bytes / 1048576).toFixed(1) + ' MB'
+}
+
+function renderTree(nodes: FileNode[], depth: number = 0): string {
+  let out = ''
+  for (const n of nodes) {
+    const indent = '  '.repeat(depth)
+    if (n.isDirectory) {
+      out += indent + '📁 ' + n.name + '/\n'
+      if (n.children) out += renderTree(n.children, depth + 1)
+    } else {
+      out += indent + '📄 ' + n.name + '  (' + formatSize(n.size) + ')\n'
+    }
+  }
+  return out
+}
+
 const canManage = () => {
   if (!project.value) return false
   return auth.user?.username === project.value.ownerName || auth.isAdmin()
@@ -97,6 +144,7 @@ onMounted(load)
   <div v-else-if="error" class="alert alert-error">{{ error }}</div>
   <div v-else-if="!project" style="text-align:center;padding:80px">未找到该项目</div>
   <div v-else>
+    <!-- 标题 -->
     <div style="display:flex;justify-content:space-between;align-items:start;flex-wrap:wrap;gap:16px">
       <div>
         <h1 class="page-title">{{ project.name }}</h1>
@@ -109,6 +157,7 @@ onMounted(load)
 
     <div v-if="message" class="alert alert-success mt-16">{{ message }}</div>
 
+    <!-- 基本信息卡片 -->
     <div class="grid-3 mt-16">
       <div class="card"><strong>端口</strong><br>{{ project.port }}</div>
       <div class="card"><strong>.NET 版本</strong><br>{{ project.dotNetVersion }}</div>
@@ -116,6 +165,47 @@ onMounted(load)
       <div class="card"><strong>可见性</strong><br>{{ project.isPublic ? '公开' : '私有' }}</div>
       <div class="card"><strong>Git 仓库</strong><br>{{ project.gitRepo || '无' }}</div>
       <div class="card"><strong>创建时间</strong><br>{{ new Date(project.createdAt).toLocaleDateString() }}</div>
+    </div>
+
+    <!-- 部署指令 -->
+    <div class="card mt-16">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+        <h3>⚙️ 部署指令</h3>
+        <button v-if="!editingArgs" class="btn btn-outline btn-sm" @click="editingArgs = true">编辑</button>
+      </div>
+      <p style="color:var(--text-muted);font-size:0.85rem;margin-bottom:8px">
+        自定义 dotnet run 的启动参数，留空则使用默认值 <code>--urls http://0.0.0.0:{{ project.port }}</code>
+      </p>
+      <div v-if="editingArgs">
+        <textarea
+          v-model="startupArgsDraft"
+          class="form-input"
+          rows="3"
+          placeholder="例如：--urls http://0.0.0.0:5000 --environment Production"
+          style="font-family:monospace;font-size:0.85rem"
+        ></textarea>
+        <div style="display:flex;gap:8px;margin-top:8px">
+          <button class="btn btn-primary btn-sm" @click="saveStartupArgs">保存</button>
+          <button class="btn btn-outline btn-sm" @click="editingArgs = false; startupArgsDraft = project.startupArgs || ''">取消</button>
+        </div>
+      </div>
+      <div v-else>
+        <pre style="background:var(--bg);padding:12px;border-radius:8px;font-size:0.85rem;color:var(--text);overflow-x:auto;margin:0">{{
+          startupArgsDraft || 'dotnet run -c Release --urls http://0.0.0.0:' + project.port
+        }}</pre>
+      </div>
+    </div>
+
+    <!-- 文件结构 -->
+    <div class="card mt-16">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+        <h3>📂 项目文件结构</h3>
+        <button class="btn btn-outline btn-sm" @click="loadFileTree">🔄 刷新</button>
+      </div>
+      <pre v-if="fileTree.length > 0" style="background:var(--bg);padding:16px;border-radius:8px;font-size:0.85rem;line-height:1.6;overflow-x:auto;margin:0">{{ renderTree(fileTree) }}</pre>
+      <div v-else style="text-align:center;padding:40px;color:var(--text-muted)">
+        暂无文件，请先上传项目文件
+      </div>
     </div>
 
     <!-- 操作按钮 -->

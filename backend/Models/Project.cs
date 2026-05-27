@@ -35,6 +35,9 @@ public class Project
     public string? GitRepo { get; set; }
     
     public bool IsPublic { get; set; } = false;
+
+    [MaxLength(500)]
+    public string StartupArgs { get; set; } = "";  // custom dotnet run args, e.g. "--urls http://0.0.0.0:5000"
 }
 
 public class ProjectDto
@@ -50,6 +53,8 @@ public class ProjectDto
     public bool IsPublic { get; set; }
     public string? GitRepo { get; set; }
     public string? OwnerName { get; set; }
+    public string StartupArgs { get; set; } = "";
+    public string StoragePath { get; set; } = "";
 }
 
 public class ProjectCreateRequest
@@ -69,4 +74,14 @@ public class ProjectUpdateRequest
     public int? Port { get; set; }
     public bool? IsPublic { get; set; }
     public string? GitRepo { get; set; }
+    public string? StartupArgs { get; set; }
+}
+
+public class FileNode
+{
+    public string Name { get; set; } = "";
+    public string Path { get; set; } = "";
+    public bool IsDirectory { get; set; }
+    public long Size { get; set; }
+    public List<FileNode>? Children { get; set; }
 }

@@ -163,6 +163,16 @@ public class ProjectsController : ControllerBase
         }
     }
     
+    [Authorize]
+    [HttpGet("{id}/files")]
+    public async Task<ActionResult> GetFiles(int id)
+    {
+        var project = await _projectService.GetById(id);
+        if (project == null) return NotFound();
+        var tree = _projectService.GetFileTree(project.StoragePath);
+        return Ok(tree);
+    }
+    
     private int? GetUserId()
     {
         var idClaim = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;

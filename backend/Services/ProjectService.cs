@@ -83,6 +83,7 @@ public class ProjectService
         if (req.Name != null) project.Name = req.Name;
         if (req.Description != null) project.Description = req.Description;
         if (req.GitRepo != null) project.GitRepo = req.GitRepo;
+        if (req.StartupArgs != null) project.StartupArgs = req.StartupArgs;
         if (req.IsPublic.HasValue) project.IsPublic = req.IsPublic.Value;
         if (req.Port.HasValue && req.Port.Value != project.Port)
         {
@@ -218,12 +219,16 @@ public class ProjectService
         try
         {
             var dotnet = "/usr/share/dotnet/dotnet";
+            var defaultArgs = $"run -c Release --urls http://0.0.0.0:{project.Port}";
+            var args = !string.IsNullOrWhiteSpace(project.StartupArgs)
+                ? $"run -c Release {project.StartupArgs}"
+                : defaultArgs;
             var process = new Process
             {
                 StartInfo = new ProcessStartInfo
                 {
                     FileName = dotnet,
-                    Arguments = $"run -c Release --urls http://0.0.0.0:{project.Port}",
+                    Arguments = args,
                     WorkingDirectory = project.StoragePath,
                     RedirectStandardOutput = true,
                     RedirectStandardError = true,
@@ -297,6 +302,41 @@ public class ProjectService
         UpdatedAt = p.UpdatedAt,
         IsPublic = p.IsPublic,
         GitRepo = p.GitRepo,
-        OwnerName = p.User?.Username
+        OwnerName = p.User?.Username,
+        StartupArgs = p.StartupArgs,
+        StoragePath = p.StoragePath
     };
+
+    public List<FileNode> GetFileTree(string rootPath)
+    {
+        var result = new List<FileNode>();
+        if (!Directory.Exists(rootPath)) return result;
+        
+        foreach (var dir in Directory.GetDirectories(rootPath))
+        {
+            var info = new DirectoryInfo(dir);
+            if (info.Name == ".git" || info.Name == "bin" || info.Name == "obj") continue;
+            result.Add(new FileNode
+            {
+                Name = info.Name,
+                Path = dir.Replace(rootPath, "").TrimStart(Path.DirectorySeparatorChar),
+                IsDirectory = true,
+                Size = 0,
+                Children = GetFileTree(dir)
+            });
+        }
+        foreach (var file in Directory.GetFiles(rootPath))
+        {
+            var info = new FileInfo(file);
+            result.Add(new FileNode
+            {
+                Name = info.Name,
+                Path = file.Replace(rootPath, "").TrimStart(Path.DirectorySeparatorChar),
+                IsDirectory = false,
+                Size = info.Length,
+                Children = null
+            });
+        }
+        return result.OrderBy(f => f.IsDirectory ? 0 : 1).ThenBy(f => f.Name).ToList();
+    }
 }
