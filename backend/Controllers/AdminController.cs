@@ -1,4 +1,5 @@
 
+using System.Security.Claims;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -34,9 +35,15 @@ public class AdminController : ControllerBase
     {
         var user = await _db.Users.FindAsync(id);
         if (user == null) return NotFound();
+
+        // Cannot disable self
+        var currentUserId = int.Parse(User.FindFirst(ClaimTypes.NameIdentifier)!.Value);
+        if (user.Id == currentUserId)
+            return BadRequest(new { message = "不能对自己执行此操作" });
+
         user.IsActive = !user.IsActive;
         await _db.SaveChangesAsync();
-        return Ok(new { message = $"User {(user.IsActive ? "activated" : "deactivated")}" });
+        return Ok(new { message = $"用户{(user.IsActive ? "已激活" : "已禁用")}" });
     }
     
     [HttpPut("users/{id}/role")]
@@ -45,10 +52,32 @@ public class AdminController : ControllerBase
         var user = await _db.Users.FindAsync(id);
         if (user == null) return NotFound();
         if (req.Role is not ("user" or "admin"))
-            return BadRequest(new { message = "Invalid role" });
+            return BadRequest(new { message = "无效的角色" });
+
+        // Cannot change own role
+        var currentUserId = int.Parse(User.FindFirst(ClaimTypes.NameIdentifier)!.Value);
+        if (user.Id == currentUserId)
+            return BadRequest(new { message = "不能修改自己的角色" });
+
         user.Role = req.Role;
         await _db.SaveChangesAsync();
-        return Ok(new { message = $"Role changed to {req.Role}" });
+        return Ok(new { message = $"角色已变更为 {req.Role}" });
+    }
+
+    [HttpPut("change-password")]
+    [Authorize]  // Override class-level admin requirement — any logged-in user
+    public async Task<ActionResult> ChangeOwnPassword([FromBody] ChangePasswordRequest req)
+    {
+        var userId = int.Parse(User.FindFirst(ClaimTypes.NameIdentifier)!.Value);
+        var user = await _db.Users.FindAsync(userId);
+        if (user == null) return NotFound();
+
+        if (!BCrypt.Net.BCrypt.Verify(req.CurrentPassword, user.PasswordHash))
+            return BadRequest(new { message = "当前密码不正确" });
+
+        user.PasswordHash = BCrypt.Net.BCrypt.HashPassword(req.NewPassword);
+        await _db.SaveChangesAsync();
+        return Ok(new { message = "密码修改成功" });
     }
     
     [HttpGet("stats")]
@@ -64,4 +93,10 @@ public class AdminController : ControllerBase
 public class ChangeRoleRequest
 {
     public string Role { get; set; } = "user";
+}
+
+public class ChangePasswordRequest
+{
+    public string CurrentPassword { get; set; } = "";
+    public string NewPassword { get; set; } = "";
 }
