@@ -27,6 +27,9 @@ public class ChunkUploadController : ControllerBase
         [FromForm] int totalChunks,
         [FromForm] string fileName)
     {
+        if (!fileName.EndsWith(".zip", StringComparison.OrdinalIgnoreCase))
+            return BadRequest(new { message = "只允许上传 .zip 文件" });
+
         var project = await _projectService.GetById(id);
         if (project == null) return NotFound();
         
