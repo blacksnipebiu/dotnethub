@@ -115,12 +115,15 @@ public class ProjectsController : ControllerBase
         try
         {
             var result = await _projectService.Build(id, GetUserId()!.Value, GetUserRole()!);
-            if (!result) return BadRequest(new { message = "Build failed" });
-            return Ok(new { message = "Build successful" });
+            return Ok(new { message = "构建成功" });
         }
         catch (UnauthorizedAccessException)
         {
             return Forbid();
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { message = ex.Message });
         }
     }
     
@@ -131,12 +134,15 @@ public class ProjectsController : ControllerBase
         try
         {
             var result = await _projectService.Deploy(id, GetUserId()!.Value, GetUserRole()!);
-            if (!result) return BadRequest(new { message = "Deploy failed" });
-            return Ok(new { message = "Deployed successfully" });
+            return Ok(new { message = "部署成功" });
         }
         catch (UnauthorizedAccessException)
         {
             return Forbid();
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { message = ex.Message });
         }
     }
     

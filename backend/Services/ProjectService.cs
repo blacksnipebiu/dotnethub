@@ -1,6 +1,7 @@
 
 using System.Diagnostics;
 using System.IO.Compression;
+using System.Runtime.InteropServices;
 using Microsoft.EntityFrameworkCore;
 using DotNetHub.Server.Data;
 using DotNetHub.Server.Models;
@@ -180,7 +181,7 @@ public class ProjectService
         
         try
         {
-            var dotnet = "/usr/share/dotnet/dotnet";
+            var dotnet = GetDotNetPath();
             var process = new Process
             {
                 StartInfo = new ProcessStartInfo
@@ -199,23 +200,24 @@ public class ProjectService
             
             if (process.ExitCode != 0)
             {
-                var error = await process.StandardError.ReadToEndAsync();
-                _logger.LogError("Build failed for project {Id}: {Error}", id, error);
+                var err = (await process.StandardError.ReadToEndAsync()).Trim();
+                if (string.IsNullOrEmpty(err)) err = await process.StandardOutput.ReadToEndAsync();
                 project.Status = "error";
                 await _db.SaveChangesAsync();
-                return false;
+                throw new InvalidOperationException($"构建失败（退出码 {process.ExitCode}）：{err}");
             }
             
             project.Status = "stopped";
             await _db.SaveChangesAsync();
             return true;
         }
+        catch (InvalidOperationException) { throw; }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Build exception for project {Id}", id);
             project.Status = "error";
             await _db.SaveChangesAsync();
-            return false;
+            throw new InvalidOperationException($"构建异常：{ex.Message}", ex);
         }
     }
     
@@ -260,21 +262,32 @@ public class ProjectService
             await Task.Delay(2000);
             if (process.HasExited)
             {
+                var exitErr = "";
+                try { exitErr = process.StandardError.ReadToEnd().Trim(); } catch { }
+                if (string.IsNullOrEmpty(exitErr)) try { exitErr = process.StandardOutput.ReadToEnd().Trim(); } catch { }
                 project.Status = "error";
                 project.ProcessId = null;
                 await _db.SaveChangesAsync();
-                return false;
+                throw new InvalidOperationException($"部署失败（退出码 {process.ExitCode}）：{exitErr}");
             }
             
             return true;
         }
+        catch (InvalidOperationException) { throw; }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Deploy exception for project {Id}", id);
             project.Status = "error";
             await _db.SaveChangesAsync();
-            return false;
+            throw new InvalidOperationException($"部署异常：{ex.Message}", ex);
         }
+    }
+
+    private static string GetDotNetPath()
+    {
+        if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+            return "dotnet";
+        return "/usr/share/dotnet/dotnet";
     }
 
     private bool IsPublishedPackage(string path)
@@ -290,7 +303,7 @@ public class ProjectService
 
     private (string command, string args) GetDeployCommand(Project project)
     {
-        var dotnet = "/usr/share/dotnet/dotnet";
+        var dotnet = GetDotNetPath();
         var port = project.Port;
         
         // If published package, find the main dll
