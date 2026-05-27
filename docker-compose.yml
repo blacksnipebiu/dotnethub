@@ -13,7 +13,7 @@ services:
     restart: unless-stopped
     environment:
       - DOTNET_ENVIRONMENT=Production
-      - ASPNETCORE_URLS=http://0.0.0.0:5100
+      - ASPNETCORE_URLS=http://0.0.0.0:5000
       - ConnectionStrings__Default=Data Source=/app/data/dotnethub.db
       - Storage__ProjectsPath=/app/data/projects
 

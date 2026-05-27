@@ -5,7 +5,6 @@ import { useRoute, useRouter } from 'vue-router'
 import { useProjectsStore, type Project } from '../stores/projects'
 import { useAuthStore } from '../stores/auth'
 import api from '../api'
-import { storeToRefs } from 'pinia'
 
 const route = useRoute()
 const router = useRouter()
@@ -23,7 +22,7 @@ async function load() {
     const { data } = await api.get(`/projects/${route.params.id}`)
     project.value = data
   } catch (e: any) {
-    error.value = 'Project not found'
+    error.value = '项目不存在'
   } finally {
     loading.value = false
   }
@@ -31,36 +30,36 @@ async function load() {
 
 async function upload() {
   if (!fileInput.value?.files?.length || !project.value) return
-  message.value = 'Uploading...'
+  message.value = '上传中...'
   try {
     await store.uploadFiles(project.value.id, fileInput.value.files)
-    message.value = 'Files uploaded!'
+    message.value = '文件上传成功！'
   } catch (e: any) {
-    error.value = 'Upload failed'
+    error.value = '上传失败'
   }
 }
 
 async function build() {
   if (!project.value) return
-  message.value = 'Building...'
+  message.value = '正在构建...'
   try {
     await store.buildProject(project.value.id)
-    message.value = 'Build successful!'
+    message.value = '构建成功！'
     await load()
   } catch (e: any) {
-    message.value = 'Build failed: ' + (e.response?.data?.message || 'error')
+    message.value = '构建失败：' + (e.response?.data?.message || '未知错误')
   }
 }
 
 async function deploy() {
   if (!project.value) return
-  message.value = 'Deploying...'
+  message.value = '正在部署...'
   try {
     await store.deployProject(project.value.id)
-    message.value = 'Deployed!'
+    message.value = '部署成功！'
     await load()
   } catch (e: any) {
-    message.value = 'Deploy failed: ' + (e.response?.data?.message || 'error')
+    message.value = '部署失败：' + (e.response?.data?.message || '未知错误')
   }
 }
 
@@ -68,20 +67,20 @@ async function stop() {
   if (!project.value) return
   try {
     await store.stopProject(project.value.id)
-    message.value = 'Stopped'
+    message.value = '已停止'
     await load()
   } catch (e: any) {
-    message.value = 'Stop failed'
+    message.value = '停止失败'
   }
 }
 
 async function del() {
-  if (!project.value || !confirm('Delete this project?')) return
+  if (!project.value || !confirm('确定要删除此项目吗？此操作不可恢复。')) return
   try {
     await store.deleteProject(project.value.id)
     router.push('/dashboard')
   } catch (e: any) {
-    error.value = 'Delete failed'
+    error.value = '删除失败'
   }
 }
 
@@ -94,46 +93,47 @@ onMounted(load)
 </script>
 
 <template>
-  <div v-if="loading" style="text-align:center;padding:80px">Loading...</div>
+  <div v-if="loading" style="text-align:center;padding:80px">加载中...</div>
   <div v-else-if="error" class="alert alert-error">{{ error }}</div>
-  <div v-else-if="!project" style="text-align:center;padding:80px">Not found</div>
+  <div v-else-if="!project" style="text-align:center;padding:80px">未找到该项目</div>
   <div v-else>
     <div style="display:flex;justify-content:space-between;align-items:start;flex-wrap:wrap;gap:16px">
       <div>
         <h1 class="page-title">{{ project.name }}</h1>
-        <p style="color:var(--text-muted)">{{ project.description || 'No description' }}</p>
+        <p style="color:var(--text-muted)">{{ project.description || '暂无描述' }}</p>
       </div>
-      <span :class="'status-badge status-'+project.status" style="font-size:0.9rem">{{ project.status }}</span>
+      <span :class="'status-badge status-'+project.status" style="font-size:0.9rem">
+        {{ project.status === 'running' ? '运行中' : project.status === 'stopped' ? '已停止' : project.status === 'building' ? '构建中' : '异常' }}
+      </span>
     </div>
 
     <div v-if="message" class="alert alert-success mt-16">{{ message }}</div>
 
     <div class="grid-3 mt-16">
-      <div class="card"><strong>Port</strong><br>{{ project.port }}</div>
-      <div class="card"><strong>.NET</strong><br>{{ project.dotNetVersion }}</div>
-      <div class="card"><strong>Owner</strong><br>{{ project.ownerName }}</div>
-      <div class="card"><strong>Visibility</strong><br>{{ project.isPublic ? 'Public' : 'Private' }}</div>
-      <div class="card"><strong>Git Repo</strong><br>{{ project.gitRepo || 'None' }}</div>
-      <div class="card"><strong>Created</strong><br>{{ new Date(project.createdAt).toLocaleDateString() }}</div>
+      <div class="card"><strong>端口</strong><br>{{ project.port }}</div>
+      <div class="card"><strong>.NET 版本</strong><br>{{ project.dotNetVersion }}</div>
+      <div class="card"><strong>创建者</strong><br>{{ project.ownerName }}</div>
+      <div class="card"><strong>可见性</strong><br>{{ project.isPublic ? '公开' : '私有' }}</div>
+      <div class="card"><strong>Git 仓库</strong><br>{{ project.gitRepo || '无' }}</div>
+      <div class="card"><strong>创建时间</strong><br>{{ new Date(project.createdAt).toLocaleDateString() }}</div>
     </div>
 
-    <!-- Actions -->
+    <!-- 操作按钮 -->
     <div v-if="canManage()" class="card mt-16">
-      <h3 style="margin-bottom:16px">🔧 Actions</h3>
+      <h3 style="margin-bottom:16px">🔧 操作</h3>
       
       <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
-        <!-- Upload -->
         <input ref="fileInput" type="file" multiple accept=".zip,.cs,.csproj,.sln,.json,.cshtml" style="display:none" @change="upload" />
-        <button class="btn btn-outline btn-sm" @click="fileInput?.click()">📁 Upload Files</button>
+        <button class="btn btn-outline btn-sm" @click="fileInput?.click()">📁 上传文件</button>
         
-        <button class="btn btn-outline btn-sm" @click="build">🔨 Build</button>
-        <button class="btn btn-success btn-sm" @click="deploy">🚀 Deploy</button>
-        <button class="btn btn-error btn-sm" @click="stop">⏹ Stop</button>
-        <button class="btn btn-error btn-sm" @click="del" style="margin-left:auto">🗑 Delete</button>
+        <button class="btn btn-outline btn-sm" @click="build">🔨 构建</button>
+        <button class="btn btn-success btn-sm" @click="deploy">🚀 部署</button>
+        <button class="btn btn-error btn-sm" @click="stop">⏹ 停止</button>
+        <button class="btn btn-error btn-sm" @click="del" style="margin-left:auto">🗑 删除</button>
       </div>
       
       <p v-if="project.status === 'running'" class="mt-16" style="font-size:0.85rem;color:var(--text-muted)">
-        🌐 Running at: <a :href="'http://localhost:'+project.port" target="_blank">http://localhost:{{ project.port }}</a>
+        🌐 访问地址：<a :href="'http://localhost:'+project.port" target="_blank">http://localhost:{{ project.port }}</a>
       </p>
     </div>
   </div>

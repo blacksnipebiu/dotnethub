@@ -19,16 +19,16 @@ function logout() {
         <router-link to="/">🚀 DotNetHub</router-link>
       </div>
       <div class="nav-links">
-        <router-link to="/projects">Projects</router-link>
+        <router-link to="/projects">项目管理</router-link>
         <template v-if="auth.isLoggedIn()">
-          <router-link to="/dashboard">Dashboard</router-link>
-          <router-link to="/projects/create">+ New</router-link>
-          <router-link v-if="auth.isAdmin()" to="/admin">Admin</router-link>
+          <router-link to="/dashboard">控制台</router-link>
+          <router-link to="/projects/create">+ 新建项目</router-link>
+          <router-link v-if="auth.isAdmin()" to="/admin">系统管理</router-link>
           <span class="nav-user">{{ auth.user?.username }}</span>
-          <a href="#" @click.prevent="logout">Logout</a>
+          <a href="#" @click.prevent="logout">退出登录</a>
         </template>
         <template v-else>
-          <router-link to="/login">Login</router-link>
+          <router-link to="/login">登录</router-link>
         </template>
       </div>
     </nav>

@@ -15,28 +15,28 @@ onMounted(() => store.fetchProjects())
 <template>
   <div>
     <div style="display:flex;justify-content:space-between;align-items:center" class="mb-16">
-      <h1 class="page-title">My Dashboard</h1>
-      <router-link to="/projects/create" class="btn btn-primary">+ New Project</router-link>
+      <h1 class="page-title">控制台</h1>
+      <router-link to="/projects/create" class="btn btn-primary">+ 新建项目</router-link>
     </div>
 
-    <div v-if="loading" style="text-align:center;padding:40px">Loading...</div>
+    <div v-if="loading" style="text-align:center;padding:40px">加载中...</div>
     <div v-else-if="projects.length === 0" style="text-align:center;padding:60px;color:var(--text-muted)">
-      <p style="font-size:1.2rem;margin-bottom:16px">No projects yet</p>
-      <router-link to="/projects/create" class="btn btn-primary">Create Your First Project</router-link>
+      <p style="font-size:1.2rem;margin-bottom:16px">还没有项目</p>
+      <router-link to="/projects/create" class="btn btn-primary">创建第一个项目</router-link>
     </div>
     <div v-else class="grid-2">
       <div v-for="p in projects" :key="p.id" class="card" style="cursor:pointer" @click="router.push('/projects/'+p.id)">
         <div style="display:flex;justify-content:space-between;align-items:start">
           <div>
             <h3>{{ p.name }}</h3>
-            <p style="color:var(--text-muted);font-size:0.85rem;margin-top:4px">{{ p.description || 'No description' }}</p>
+            <p style="color:var(--text-muted);font-size:0.85rem;margin-top:4px">{{ p.description || '暂无描述' }}</p>
           </div>
           <span :class="'status-badge status-'+p.status">{{ p.status }}</span>
         </div>
         <div style="display:flex;gap:12px;margin-top:12px;font-size:0.8rem;color:var(--text-muted)">
-          <span>🔌 :{{ p.port }}</span>
+          <span>🔌 端口 :{{ p.port }}</span>
           <span>.NET {{ p.dotNetVersion }}</span>
-          <span>{{ p.isPublic ? '🌐 Public' : '🔒 Private' }}</span>
+          <span>{{ p.isPublic ? '🌐 公开' : '🔒 私有' }}</span>
         </div>
       </div>
     </div>

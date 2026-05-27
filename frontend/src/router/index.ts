@@ -12,6 +12,7 @@ const routes = [
     path: '/',
     name: 'Home',
     component: () => import('../views/HomeView.vue'),
+    meta: { requiresAuth: true }
   },
   {
     path: '/dashboard',
@@ -23,6 +24,7 @@ const routes = [
     path: '/projects',
     name: 'Projects',
     component: () => import('../views/ProjectsView.vue'),
+    meta: { requiresAuth: true }
   },
   {
     path: '/projects/create',
@@ -34,6 +36,7 @@ const routes = [
     path: '/projects/:id',
     name: 'ProjectDetail',
     component: () => import('../views/ProjectDetailView.vue'),
+    meta: { requiresAuth: true }
   },
   {
     path: '/admin',
@@ -54,7 +57,7 @@ router.beforeEach((to, from, next) => {
 
   if (to.meta.requiresAuth && !token) return next('/login')
   if (to.meta.requiresAdmin && user.role !== 'admin') return next('/')
-  if (to.meta.guest && token) return next('/')
+  if (to.meta.guest && token) return next('/dashboard')
   next()
 })
 
