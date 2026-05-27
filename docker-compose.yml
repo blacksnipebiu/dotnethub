@@ -9,11 +9,13 @@ services:
     ports:
       - "5100:5100"
     volumes:
-      - dotnethub-data:/data
+      - dotnethub-data:/app/data
     restart: unless-stopped
     environment:
       - DOTNET_ENVIRONMENT=Production
       - ASPNETCORE_URLS=http://0.0.0.0:5100
+      - ConnectionStrings__Default=Data Source=/app/data/dotnethub.db
+      - Storage__ProjectsPath=/app/data/projects
 
 volumes:
   dotnethub-data:

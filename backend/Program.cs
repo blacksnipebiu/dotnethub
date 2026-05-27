@@ -9,10 +9,10 @@ using DotNetHub.Server.Services;
 var builder = WebApplication.CreateBuilder(args);
 
 // Database
-var dbPath = builder.Configuration.GetConnectionString("Default")
-    ?? "Data Source=/data/dotnethub.db";
+var dbConnectionString = builder.Configuration.GetConnectionString("Default")
+    ?? "Data Source=dotnethub.db";
 builder.Services.AddDbContext<AppDbContext>(options =>
-    options.UseSqlite(dbPath));
+    options.UseSqlite(dbConnectionString));
 
 // JWT Auth
 var jwtKey = builder.Configuration["Jwt:Key"] ?? "DotNetHub_Super_Secret_Key_Min_32_Chars!";
@@ -48,26 +48,38 @@ builder.Services.AddControllers();
 
 var app = builder.Build();
 
-// Auto-migrate
+// ---- Ensure directories exist before using them ----
+
+// Get database path from connection string, extract the file path
+var dbDataSource = dbConnectionString.Replace("Data Source=", "").Trim();
+if (!Path.IsPathRooted(dbDataSource))
+    dbDataSource = Path.Combine(app.Environment.ContentRootPath, dbDataSource);
+
+var dbDir = Path.GetDirectoryName(dbDataSource);
+if (dbDir != null) Directory.CreateDirectory(dbDir);
+
+// Storage directory for deployed projects
+var storagePath = builder.Configuration["Storage:ProjectsPath"] ?? "projects";
+if (!Path.IsPathRooted(storagePath))
+    storagePath = Path.Combine(app.Environment.ContentRootPath, storagePath);
+Directory.CreateDirectory(storagePath);
+
+// Auto-migrate database
 using (var scope = app.Services.CreateScope())
 {
     var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
     db.Database.EnsureCreated();
 }
 
-// Ensure storage directory
-var storagePath = builder.Configuration["Storage:ProjectsPath"] ?? "/data/projects";
-Directory.CreateDirectory(storagePath);
-
 app.UseCors();
 app.UseAuthentication();
 app.UseAuthorization();
 app.MapControllers();
 
-// Serve frontend SPA — check wwwroot first (Docker), then relative path (dev)
-var frontendRoot = Path.Combine(builder.Environment.ContentRootPath, "wwwroot");
+// Serve frontend SPA — check wwwroot first (Docker / publish), then dev path
+var frontendRoot = Path.Combine(app.Environment.ContentRootPath, "wwwroot");
 if (!Directory.Exists(frontendRoot))
-    frontendRoot = Path.Combine(builder.Environment.ContentRootPath, "..", "frontend", "dist");
+    frontendRoot = Path.Combine(app.Environment.ContentRootPath, "..", "frontend", "dist");
 
 if (Directory.Exists(frontendRoot))
 {
