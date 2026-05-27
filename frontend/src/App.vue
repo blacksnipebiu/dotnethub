@@ -1,10 +1,29 @@
-
 <script setup lang="ts">
+import { ref, onMounted, watch } from 'vue'
 import { useAuthStore } from './stores/auth'
 import { useRouter } from 'vue-router'
 
 const auth = useAuthStore()
 const router = useRouter()
+
+const darkMode = ref(localStorage.getItem('darkMode') === 'true')
+
+onMounted(() => {
+  applyTheme()
+})
+
+watch(darkMode, () => {
+  localStorage.setItem('darkMode', darkMode.value.toString())
+  applyTheme()
+})
+
+function applyTheme() {
+  document.documentElement.classList.toggle('dark', darkMode.value)
+}
+
+function toggleTheme() {
+  darkMode.value = !darkMode.value
+}
 
 function logout() {
   auth.logout()
@@ -23,6 +42,12 @@ function logout() {
           <router-link to="/dashboard">控制台</router-link>
           <router-link to="/projects">项目管理</router-link>
           <router-link v-if="auth.isAdmin()" to="/admin">系统管理</router-link>
+          <router-link v-if="auth.isAdmin()" to="/settings">系统设置</router-link>
+        </template>
+        <button class="theme-toggle" @click="toggleTheme" :title="darkMode ? '切换亮色' : '切换深色'">
+          {{ darkMode ? '☀️' : '🌙' }}
+        </button>
+        <template v-if="auth.isLoggedIn()">
           <span class="nav-user">{{ auth.user?.username }}</span>
           <a href="#" @click.prevent="logout">退出登录</a>
         </template>
@@ -49,6 +74,16 @@ function logout() {
   --success: #22c55e;
   --error: #ef4444;
   --warning: #f59e0b;
+  --code-bg: #f1f5f9;
+}
+
+.dark {
+  --bg: #0f172a;
+  --card-bg: #1e293b;
+  --text: #e2e8f0;
+  --text-muted: #94a3b8;
+  --border: #334155;
+  --code-bg: #0f172a;
 }
 
 * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -57,6 +92,7 @@ body {
   font-family: system-ui, -apple-system, sans-serif;
   background: var(--bg);
   color: var(--text);
+  transition: background 0.3s, color 0.3s;
 }
 
 .navbar {
@@ -96,6 +132,19 @@ body {
   color: var(--primary);
 }
 
+.theme-toggle {
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 4px 8px;
+  font-size: 1.1rem;
+  cursor: pointer;
+  line-height: 1;
+  transition: background 0.2s;
+}
+
+.theme-toggle:hover { background: var(--bg); }
+
 .nav-user {
   color: var(--text);
   font-weight: 500;
@@ -132,45 +181,16 @@ body {
   text-decoration: none;
 }
 
-.btn-primary {
-  background: var(--primary);
-  color: white;
-}
+.btn-primary { background: var(--primary); color: white; }
 .btn-primary:hover { background: var(--primary-dark); }
-
-.btn-success {
-  background: var(--success);
-  color: white;
-}
-
-.btn-error {
-  background: var(--error);
-  color: white;
-}
-
-.btn-outline {
-  background: transparent;
-  border: 1px solid var(--border);
-  color: var(--text);
-}
+.btn-success { background: var(--success); color: white; }
+.btn-error { background: var(--error); color: white; }
+.btn-outline { background: transparent; border: 1px solid var(--border); color: var(--text); }
 .btn-outline:hover { border-color: var(--primary); color: var(--primary); }
+.btn-sm { padding: 6px 12px; font-size: 0.8rem; }
 
-.btn-sm {
-  padding: 6px 12px;
-  font-size: 0.8rem;
-}
-
-.form-group {
-  margin-bottom: 16px;
-}
-
-.form-group label {
-  display: block;
-  margin-bottom: 6px;
-  font-weight: 500;
-  font-size: 0.9rem;
-  color: var(--text-muted);
-}
+.form-group { margin-bottom: 16px; }
+.form-group label { display: block; margin-bottom: 6px; font-weight: 500; font-size: 0.9rem; color: var(--text-muted); }
 
 .form-input {
   width: 100%;
@@ -180,20 +200,13 @@ body {
   font-size: 0.95rem;
   transition: border-color 0.2s;
   outline: none;
+  background: var(--card-bg);
+  color: var(--text);
 }
 
-.form-input:focus {
-  border-color: var(--primary);
-  box-shadow: 0 0 0 3px rgba(99,102,241,0.1);
-}
+.form-input:focus { border-color: var(--primary); box-shadow: 0 0 0 3px rgba(99,102,241,0.1); }
 
-.alert {
-  padding: 12px 16px;
-  border-radius: 8px;
-  margin-bottom: 16px;
-  font-size: 0.9rem;
-}
-
+.alert { padding: 12px 16px; border-radius: 8px; margin-bottom: 16px; font-size: 0.9rem; }
 .alert-error { background: #fef2f2; color: var(--error); border: 1px solid #fecaca; }
 .alert-success { background: #f0fdf4; color: #16a34a; border: 1px solid #bbf7d0; }
 
@@ -204,14 +217,9 @@ body {
 .mb-16 { margin-bottom: 16px; }
 
 .status-badge {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  padding: 3px 10px;
-  border-radius: 20px;
-  font-size: 0.75rem;
-  font-weight: 600;
-  text-transform: uppercase;
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 3px 10px; border-radius: 20px;
+  font-size: 0.75rem; font-weight: 600; text-transform: uppercase;
 }
 
 .status-running { background: #dcfce7; color: #16a34a; }
@@ -219,9 +227,7 @@ body {
 .status-building { background: #fef9c3; color: #ca8a04; }
 .status-error { background: #fef2f2; color: #dc2626; }
 
-.page-title {
-  font-size: 1.5rem;
-  font-weight: 700;
-  margin-bottom: 24px;
-}
+.page-title { font-size: 1.5rem; font-weight: 700; margin-bottom: 24px; }
+
+pre, code { background: var(--code-bg); border-radius: 8px; }
 </style>

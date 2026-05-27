@@ -163,6 +163,17 @@ public class ProjectService
         if (project == null) return false;
         if (project.UserId != userId && userRole != "admin")
             throw new UnauthorizedAccessException("Not authorized");
+
+        // Check if this is a published package (has .dll/.exe, no .csproj)
+        var isPublished = IsPublishedPackage(project.StoragePath);
+        
+        if (isPublished)
+        {
+            _logger.LogInformation("Project {Id} is a published package, skipping build", id);
+            project.Status = "stopped";
+            await _db.SaveChangesAsync();
+            return true;
+        }
         
         project.Status = "building";
         await _db.SaveChangesAsync();
@@ -222,16 +233,13 @@ public class ProjectService
         
         try
         {
-            var dotnet = "/usr/share/dotnet/dotnet";
-            var defaultArgs = $"run -c Release --urls http://0.0.0.0:{project.Port}";
-            var args = !string.IsNullOrWhiteSpace(project.StartupArgs)
-                ? $"run -c Release {project.StartupArgs}"
-                : defaultArgs;
+            var (command, args) = GetDeployCommand(project);
+            
             var process = new Process
             {
                 StartInfo = new ProcessStartInfo
                 {
-                    FileName = dotnet,
+                    FileName = command,
                     Arguments = args,
                     WorkingDirectory = project.StoragePath,
                     RedirectStandardOutput = true,
@@ -249,7 +257,6 @@ public class ProjectService
             
             await _db.SaveChangesAsync();
             
-            // Wait a moment and check
             await Task.Delay(2000);
             if (process.HasExited)
             {
@@ -268,6 +275,59 @@ public class ProjectService
             await _db.SaveChangesAsync();
             return false;
         }
+    }
+
+    private bool IsPublishedPackage(string path)
+    {
+        if (!Directory.Exists(path)) return false;
+        // Published package: has .dll or .exe files, no .csproj or .sln
+        var hasDll = Directory.GetFiles(path, "*.dll", SearchOption.TopDirectoryOnly).Any();
+        var hasExe = Directory.GetFiles(path, "*.exe", SearchOption.TopDirectoryOnly).Any();
+        var hasProject = Directory.GetFiles(path, "*.csproj", SearchOption.TopDirectoryOnly).Any()
+            || Directory.GetFiles(path, "*.sln", SearchOption.TopDirectoryOnly).Any();
+        return (hasDll || hasExe) && !hasProject;
+    }
+
+    private (string command, string args) GetDeployCommand(Project project)
+    {
+        var dotnet = "/usr/share/dotnet/dotnet";
+        var port = project.Port;
+        
+        // If published package, find the main dll
+        if (IsPublishedPackage(project.StoragePath))
+        {
+            var dllName = project.Name + ".dll";
+            // Try to find the project's main dll
+            var dlls = Directory.GetFiles(project.StoragePath, "*.dll", SearchOption.TopDirectoryOnly)
+                .Select(Path.GetFileName)
+                .Where(f => f != null && !f!.StartsWith("System.") && !f!.StartsWith("Microsoft.") && !f!.StartsWith("SQLite") && f != "hostfxr.dll" && f != "hostpolicy.dll")
+                .ToArray();
+            
+            if (dlls.Length > 0)
+            {
+                var mainDll = dlls.FirstOrDefault(d => d == dllName) ?? dlls[0];
+                var extraArgs = string.IsNullOrWhiteSpace(project.StartupArgs) 
+                    ? $"--urls http://0.0.0.0:{port}"
+                    : $"{project.StartupArgs}";
+                
+                // Check if user already included --urls
+                if (!extraArgs.Contains("--urls"))
+                    extraArgs = $"--urls http://0.0.0.0:{port} " + extraArgs;
+                
+                return (dotnet, $"{mainDll} {extraArgs}");
+            }
+        }
+        
+        // Source project: dotnet run
+        var defaultArgs = $"--urls http://0.0.0.0:{project.Port}";
+        var args2 = !string.IsNullOrWhiteSpace(project.StartupArgs)
+            ? $"run -c Release {project.StartupArgs}"
+            : $"run -c Release {defaultArgs}";
+        
+        if (!args2.Contains("--urls"))
+            args2 = $"run -c Release {defaultArgs} " + args2.Replace("run -c Release ", "");
+        
+        return (dotnet, args2);
     }
     
     public async Task<bool> Stop(int id)

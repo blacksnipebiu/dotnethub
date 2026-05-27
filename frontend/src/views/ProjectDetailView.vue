@@ -20,11 +20,16 @@ const fileInput = ref<HTMLInputElement | null>(null)
 const editingArgs = ref(false)
 const startupArgsDraft = ref('')
 
+// Port editing
+const editingPort = ref(false)
+const portDraft = ref(0)
+
 async function load() {
   try {
     const { data } = await api.get(`/projects/${route.params.id}`)
     project.value = data
     startupArgsDraft.value = data.startupArgs || ''
+    portDraft.value = data.port || 0
     await loadFileTree()
   } catch (e: any) {
     error.value = '项目不存在'
@@ -110,6 +115,18 @@ async function saveStartupArgs() {
   }
 }
 
+async function savePort() {
+  if (!project.value || !portDraft.value) return
+  try {
+    await store.updateProject(project.value.id, { port: portDraft.value })
+    project.value.port = portDraft.value
+    editingPort.value = false
+    message.value = '端口已更新（下次部署生效）'
+  } catch (e: any) {
+    error.value = '保存失败：' + (e.response?.data?.message || '')
+  }
+}
+
 function formatSize(bytes: number): string {
   if (!bytes || bytes <= 0) return '0 B'
   if (bytes < 1024) return bytes + ' B'
@@ -176,7 +193,17 @@ onMounted(load)
 
     <!-- 基本信息卡片 -->
     <div class="grid-3 mt-16">
-      <div class="card"><strong>端口</strong><br>{{ project.port }}</div>
+      <div class="card">
+        <strong>端口</strong><br>
+        <span v-if="!editingPort">{{ project.port }}
+          <button v-if="canManage()" class="btn btn-outline btn-sm" style="margin-left:4px;padding:2px 6px;font-size:0.7rem" @click="editingPort = true; portDraft = project.port">改</button>
+        </span>
+        <span v-else style="display:flex;gap:4px;align-items:center;margin-top:4px">
+          <input v-model.number="portDraft" class="form-input" type="number" style="width:80px;padding:4px 8px" min="1024" max="65535" />
+          <button class="btn btn-primary btn-sm" style="padding:3px 8px;font-size:0.75rem" @click="savePort">✓</button>
+          <button class="btn btn-outline btn-sm" style="padding:3px 8px;font-size:0.75rem" @click="editingPort = false">✕</button>
+        </span>
+      </div>
       <div class="card"><strong>.NET 版本</strong><br>{{ project.dotNetVersion }}</div>
       <div class="card"><strong>创建者</strong><br>{{ project.ownerName }}</div>
       <div class="card"><strong>可见性</strong><br>{{ project.isPublic ? '公开' : '私有' }}</div>
