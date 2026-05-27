@@ -18,6 +18,7 @@ const error = ref('')
 const message = ref('')
 const fileInput = ref<HTMLInputElement | null>(null)
 const logTimer = ref<number | null>(null)
+const fileTreeTimer = ref<number | null>(null)
 
 const editingArgs = ref(false)
 const startupArgsDraft = ref('')
@@ -68,12 +69,36 @@ function stopLogPolling() {
 
 async function upload() {
   if (!fileInput.value?.files?.length || !project.value) return
+
+  // Check if project already has files
+  let mode = 'overwrite'
+  try {
+    const { data } = await api.get(`/projects/${project.value.id}/has-files`)
+    if (data.hasFiles) {
+      const choice = confirm(
+        '该项目已有文件，请选择更新方式：\n\n' +
+        '【确定】= 覆盖更新（保留同名文件，新增/替换不同文件）\n' +
+        '【取消】= 删除后更新（清空所有文件再解压）'
+      )
+      mode = choice ? 'overwrite' : 'delete'
+    }
+  } catch (e) { /* proceed with overwrite */ }
+
   message.value = '上传中...'
   try {
-    await store.uploadFiles(project.value.id, fileInput.value.files)
+    await store.uploadFiles(project.value.id, fileInput.value.files, mode)
     message.value = '文件上传成功！'
     await loadFileTree()
+    startFileTreePolling()
   } catch (e: any) { error.value = '上传失败' }
+}
+
+function startFileTreePolling() {
+  stopFileTreePolling()
+  fileTreeTimer.value = window.setInterval(loadFileTree, 60000)
+}
+function stopFileTreePolling() {
+  if (fileTreeTimer.value) { clearInterval(fileTreeTimer.value); fileTreeTimer.value = null }
 }
 
 async function build() {
@@ -115,6 +140,7 @@ async function del() {
   if (!project.value || !confirm('确定要删除此项目吗？此操作不可恢复。')) return
   try {
     stopLogPolling()
+    stopFileTreePolling()
     await store.deleteProject(project.value.id)
     router.push('/dashboard')
   } catch (e: any) { error.value = '删除失败' }
@@ -173,7 +199,7 @@ onMounted(() => {
   })
 })
 
-onUnmounted(() => stopLogPolling())
+onUnmounted(() => { stopLogPolling(); stopFileTreePolling() })
 </script>
 
 <template>

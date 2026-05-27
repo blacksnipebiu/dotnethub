@@ -123,7 +123,7 @@ public class ProjectService
         return true;
     }
     
-    public async Task<bool> UploadFiles(int id, IFormFileCollection files, int userId, string userRole)
+    public async Task<bool> UploadFiles(int id, IFormFileCollection files, int userId, string userRole, string mode = "overwrite")
     {
         var project = await _db.Projects.FindAsync(id);
         if (project == null) return false;
@@ -131,8 +131,8 @@ public class ProjectService
             throw new UnauthorizedAccessException("Not authorized");
         
         var extractPath = project.StoragePath;
-        // Clear existing files
-        if (Directory.Exists(extractPath))
+        // Clear existing files if mode is "delete"
+        if (mode == "delete" && Directory.Exists(extractPath))
         {
             foreach (var file in Directory.GetFiles(extractPath)) File.Delete(file);
             foreach (var dir in Directory.GetDirectories(extractPath)) Directory.Delete(dir, true);

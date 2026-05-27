@@ -93,19 +93,31 @@ public class ProjectsController : ControllerBase
     
     [Authorize]
     [HttpPost("{id}/upload")]
-    [RequestSizeLimit(300_000_000)]  // 300 MB
-    public async Task<ActionResult> Upload(int id, [FromForm] IFormFileCollection files)
+    [RequestSizeLimit(300_000_000)]
+    public async Task<ActionResult> Upload(int id, [FromForm] IFormFileCollection files, [FromQuery] string mode = "overwrite")
     {
         try
         {
-            var result = await _projectService.UploadFiles(id, files, GetUserId()!.Value, GetUserRole()!);
+            var result = await _projectService.UploadFiles(id, files, GetUserId()!.Value, GetUserRole()!, mode);
             if (!result) return NotFound();
-            return Ok(new { message = "Files uploaded" });
+            return Ok(new { message = "上传成功" });
         }
         catch (UnauthorizedAccessException)
         {
             return Forbid();
         }
+    }
+
+    [Authorize]
+    [HttpGet("{id}/has-files")]
+    public async Task<ActionResult> HasFiles(int id)
+    {
+        var project = await _projectService.GetById(id);
+        if (project == null) return NotFound();
+        var hasFiles = Directory.Exists(project.StoragePath) 
+            && (Directory.GetFiles(project.StoragePath).Length > 0 
+                || Directory.GetDirectories(project.StoragePath).Length > 0);
+        return Ok(new { hasFiles });
     }
     
     [Authorize]

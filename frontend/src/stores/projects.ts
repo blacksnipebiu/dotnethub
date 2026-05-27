@@ -57,12 +57,12 @@ export const useProjectsStore = defineStore('projects', () => {
     projects.value = projects.value.filter(p => p.id !== id)
   }
 
-  async function uploadFiles(id: number, files: FileList | File[]) {
+  async function uploadFiles(id: number, files: FileList | File[], mode = 'overwrite') {
     const formData = new FormData()
     for (const file of Array.from(files)) {
       formData.append('files', file)
     }
-    await api.post(`/projects/${id}/upload`, formData)
+    await api.post(`/projects/${id}/upload?mode=${mode}`, formData)
   }
 
   async function buildProject(id: number) {
