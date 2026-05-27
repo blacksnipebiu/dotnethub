@@ -69,11 +69,20 @@ if (!Path.IsPathRooted(storagePath))
     storagePath = Path.Combine(app.Environment.ContentRootPath, storagePath);
 Directory.CreateDirectory(storagePath);
 
-// Auto-migrate database
+// Auto-migrate database — recreate if schema changed
 using (var scope = app.Services.CreateScope())
 {
     var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-    db.Database.EnsureCreated();
+    try
+    {
+        db.Database.EnsureCreated();
+    }
+    catch
+    {
+        // Schema mismatch — delete and recreate
+        db.Database.EnsureDeleted();
+        db.Database.EnsureCreated();
+    }
 }
 
 app.UseCors();

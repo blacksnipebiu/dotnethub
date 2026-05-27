@@ -12,6 +12,7 @@ public class ProjectService
     private readonly AppDbContext _db;
     private readonly IConfiguration _config;
     private readonly ILogger<ProjectService> _logger;
+    private readonly string _storageRoot;
     private static readonly Dictionary<int, Process> RunningProcesses = new();
     
     public ProjectService(AppDbContext db, IConfiguration config, ILogger<ProjectService> logger)
@@ -19,6 +20,9 @@ public class ProjectService
         _db = db;
         _config = config;
         _logger = logger;
+        _storageRoot = config["Storage:ProjectsPath"] ?? "projects";
+        if (!Path.IsPathRooted(_storageRoot))
+            _storageRoot = Path.GetFullPath(_storageRoot);
     }
     
     public async Task<List<ProjectDto>> GetAll(int? userId = null, bool? onlyPublic = null)
@@ -65,7 +69,7 @@ public class ProjectService
         await _db.SaveChangesAsync();
         
         // Create storage directory
-        var storagePath = Path.Combine(_config["Storage:ProjectsPath"] ?? "/opt/data/dotnethub-projects", project.Id.ToString());
+        var storagePath = Path.Combine(_storageRoot, project.Id.ToString());
         Directory.CreateDirectory(storagePath);
         project.StoragePath = storagePath;
         await _db.SaveChangesAsync();
