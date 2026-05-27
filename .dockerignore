@@ -1,9 +1,0 @@
-**/node_modules
-**/bin
-**/obj
-**/.git
-**/.gitignore
-**/dist
-*.db
-*.db-shm
-*.db-wal
