@@ -142,22 +142,24 @@ public class ProjectService
         {
             if (file.FileName.EndsWith(".zip"))
             {
-                using var stream = file.OpenReadStream();
+                // Copy to MemoryStream so we can seek back if encoding mismatch
+                using var ms = new MemoryStream();
+                await file.CopyToAsync(ms);
+                ms.Position = 0;
+
                 // Try UTF-8 first, fall back to GBK for Chinese Windows zips
                 ZipArchive? archive = null;
                 try
                 {
-                    archive = new ZipArchive(stream, ZipArchiveMode.Read, false, Encoding.UTF8);
-                    // Check if any entry name has replacement chars (encoding mismatch)
+                    archive = new ZipArchive(ms, ZipArchiveMode.Read, false, Encoding.UTF8);
                     if (archive.Entries.Any(e => e.Name.Contains('\ufffd')))
                         throw new Exception("Encoding mismatch");
                 }
                 catch
                 {
-                    stream.Position = 0;
+                    ms.Position = 0;
                     archive?.Dispose();
-                    var gbk = Encoding.GetEncoding(936);
-                    archive = new ZipArchive(stream, ZipArchiveMode.Read, false, gbk);
+                    archive = new ZipArchive(ms, ZipArchiveMode.Read, false, Encoding.GetEncoding(936));
                 }
                 using (archive)
                 {
