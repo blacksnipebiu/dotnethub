@@ -17,7 +17,6 @@ const error = ref('')
 const message = ref('')
 const fileInput = ref<HTMLInputElement | null>(null)
 
-// Startup args editing
 const editingArgs = ref(false)
 const startupArgsDraft = ref('')
 
@@ -112,6 +111,7 @@ async function saveStartupArgs() {
 }
 
 function formatSize(bytes: number): string {
+  if (!bytes || bytes <= 0) return '0 B'
   if (bytes < 1024) return bytes + ' B'
   if (bytes < 1048576) return (bytes / 1024).toFixed(1) + ' KB'
   return (bytes / 1048576).toFixed(1) + ' MB'
@@ -121,11 +121,12 @@ function renderTree(nodes: FileNode[], depth: number = 0): string {
   let out = ''
   for (const n of nodes) {
     const indent = '  '.repeat(depth)
+    const name = n.name || '(未知)'
     if (n.isDirectory) {
-      out += indent + '📁 ' + n.name + '/\n'
-      if (n.children) out += renderTree(n.children, depth + 1)
+      out += indent + '📁 ' + name + '/\n'
+      if (n.children && n.children.length > 0) out += renderTree(n.children, depth + 1)
     } else {
-      out += indent + '📄 ' + n.name + '  (' + formatSize(n.size) + ')\n'
+      out += indent + '📄 ' + name + '  (' + formatSize(n.size || 0) + ')\n'
     }
   }
   return out
@@ -156,6 +157,22 @@ onMounted(load)
     </div>
 
     <div v-if="message" class="alert alert-success mt-16">{{ message }}</div>
+
+    <!-- 🔧 操作按钮 — 放在顶部 -->
+    <div v-if="canManage()" class="card mt-16">
+      <h3 style="margin-bottom:12px">🔧 操作</h3>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+        <input ref="fileInput" type="file" multiple accept=".zip,.cs,.csproj,.sln,.json,.cshtml" style="display:none" @change="upload" />
+        <button class="btn btn-outline btn-sm" @click="fileInput?.click()">📁 上传文件</button>
+        <button class="btn btn-outline btn-sm" @click="build">🔨 构建</button>
+        <button class="btn btn-success btn-sm" @click="deploy">🚀 部署</button>
+        <button class="btn btn-error btn-sm" @click="stop">⏹ 停止</button>
+        <button class="btn btn-error btn-sm" @click="del" style="margin-left:auto">🗑 删除</button>
+      </div>
+      <p v-if="project.status === 'running'" style="margin-top:12px;font-size:0.85rem;color:var(--text-muted)">
+        🌐 访问地址：<a :href="'http://localhost:'+project.port" target="_blank">http://localhost:{{ project.port }}</a>
+      </p>
+    </div>
 
     <!-- 基本信息卡片 -->
     <div class="grid-3 mt-16">
@@ -206,25 +223,6 @@ onMounted(load)
       <div v-else style="text-align:center;padding:40px;color:var(--text-muted)">
         暂无文件，请先上传项目文件
       </div>
-    </div>
-
-    <!-- 操作按钮 -->
-    <div v-if="canManage()" class="card mt-16">
-      <h3 style="margin-bottom:16px">🔧 操作</h3>
-      
-      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
-        <input ref="fileInput" type="file" multiple accept=".zip,.cs,.csproj,.sln,.json,.cshtml" style="display:none" @change="upload" />
-        <button class="btn btn-outline btn-sm" @click="fileInput?.click()">📁 上传文件</button>
-        
-        <button class="btn btn-outline btn-sm" @click="build">🔨 构建</button>
-        <button class="btn btn-success btn-sm" @click="deploy">🚀 部署</button>
-        <button class="btn btn-error btn-sm" @click="stop">⏹ 停止</button>
-        <button class="btn btn-error btn-sm" @click="del" style="margin-left:auto">🗑 删除</button>
-      </div>
-      
-      <p v-if="project.status === 'running'" class="mt-16" style="font-size:0.85rem;color:var(--text-muted)">
-        🌐 访问地址：<a :href="'http://localhost:'+project.port" target="_blank">http://localhost:{{ project.port }}</a>
-      </p>
     </div>
   </div>
 </template>
