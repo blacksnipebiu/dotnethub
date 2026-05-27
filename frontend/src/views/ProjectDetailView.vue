@@ -3,6 +3,7 @@ import { ref, onMounted, onUnmounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useProjectsStore, type Project } from '../stores/projects'
 import { useAuthStore } from '../stores/auth'
+import FileTreeNode from '../components/FileTreeNode.vue'
 import api from '../api'
 
 const CHUNK_SIZE = 2 * 1024 * 1024 // 2MB per chunk
@@ -352,8 +353,8 @@ onUnmounted(() => { stopLogPolling(); stopFileTreePolling() })
 
       <div v-if="activeTab === 'files'" style="margin-top:12px">
         <button class="btn btn-outline btn-sm" style="margin-bottom:8px" @click="loadFileTree">🔄 刷新文件树</button>
-        <pre v-if="fileTree.length > 0" style="background:var(--code-bg);padding:16px;border-radius:8px;font-size:0.85rem;line-height:1.6;overflow-x:auto;margin:0;white-space:pre;font-family:monospace">{{ renderTree(fileTree) }}</pre>
-        <div v-else style="text-align:center;padding:40px;color:var(--text-muted)">暂无文件，请先上传项目文件</div>
+        <FileTreeNode v-if="fileTree.length > 0" :nodes="fileTree" />
+        <div v-else style="text-align:center;padding:40px;color:var(--text-muted)">暂无文件</div>
       </div>
 
       <div v-if="activeTab === 'logs'" style="margin-top:12px">

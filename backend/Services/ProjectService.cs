@@ -173,13 +173,25 @@ public class ProjectService
                 using var zipMs = new MemoryStream(zipBytes);
                 using var archive = new ZipArchive(zipMs, ZipArchiveMode.Read, true, encoding);
 
+                // Check for garbled characters (encoding mismatch)
+                var hasGarbled = archive.Entries.Any(e => 
+                    !string.IsNullOrEmpty(e.Name) && e.Name.Contains('\ufffd'));
+                if (hasGarbled) throw new InvalidOperationException("Encoding mismatch");
+
                 foreach (var entry in archive.Entries)
                 {
-                    if (string.IsNullOrEmpty(entry.Name)) continue;
+                    // Skip empty entries OR directory placeholders (trailing /)
+                    var isDir = string.IsNullOrEmpty(entry.Name) || entry.FullName.EndsWith('/');
                     var destPath = Path.Combine(extractPath, entry.FullName);
                     var fullDest = Path.GetFullPath(destPath);
                     if (!fullDest.StartsWith(Path.GetFullPath(extractPath), StringComparison.OrdinalIgnoreCase))
                         throw new InvalidOperationException($"路径遍历攻击: {entry.FullName}");
+
+                    if (isDir)
+                    {
+                        Directory.CreateDirectory(fullDest);
+                        continue;
+                    }
 
                     var destDir = Path.GetDirectoryName(fullDest);
                     if (!string.IsNullOrEmpty(destDir)) Directory.CreateDirectory(destDir);
@@ -187,7 +199,10 @@ public class ProjectService
                 }
                 return;
             }
-            catch (Exception ex) { lastException = ex; }
+            catch (Exception ex) when (!(ex is InvalidOperationException && ex.Message.Contains("路径遍历")))
+            {
+                lastException = ex;
+            }
         }
         throw new InvalidOperationException($"解压失败: {lastException?.Message}", lastException);
     }
