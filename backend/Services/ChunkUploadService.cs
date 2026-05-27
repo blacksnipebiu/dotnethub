@@ -91,23 +91,62 @@ public class ChunkUploadService
         catch (Exception ex) { _logger.LogError(ex, "[Combine] Step3 FAILED"); throw; }
         _logger.LogInformation("[Combine] Step3 — read {ByteCount} bytes OK", zipBytes.Length);
         
-        // Step 4: Extract with UTF-8 encoding, safe extraction
-        _logger.LogInformation("[Combine] Step4 — extracting with UTF-8 encoding");
-        using (var ms = new MemoryStream(zipBytes))
-        using (var archive = new ZipArchive(ms, ZipArchiveMode.Read, true, Encoding.UTF8))
+        // Step 4: Extract with encoding detection (UTF-8 → GBK fallback)
+        _logger.LogInformation("[Combine] Step4 — extracting with encoding detection");
+        var encodings = new[] { Encoding.UTF8, Encoding.GetEncoding(936) };
+        Exception? extractErr = null;
+        for (int ei = 0; ei < encodings.Length; ei++)
         {
-            _logger.LogInformation("[Combine]   entries={Count}", archive.Entries.Count);
-            var basePath = Path.GetFullPath(projectPath);
-            foreach (var entry in archive.Entries)
+            var enc = encodings[ei];
+            _logger.LogInformation("[Combine]   try encoding {Idx}: {Enc}", ei, enc.EncodingName);
+            try
             {
-                if (string.IsNullOrEmpty(entry.Name)) continue;
-                var dest = Path.GetFullPath(Path.Combine(basePath, entry.FullName));
-                if (!dest.StartsWith(basePath, StringComparison.OrdinalIgnoreCase))
-                    throw new InvalidOperationException($"路径遍历攻击: {entry.FullName}");
-                var dir = Path.GetDirectoryName(dest);
-                if (!string.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir);
-                entry.ExtractToFile(dest, true);
+                using var ms = new MemoryStream(zipBytes);
+                using var archive = new ZipArchive(ms, ZipArchiveMode.Read, true, enc);
+
+                var entries = archive.Entries.ToList();
+                var sampleNames = entries.Take(10).Select(e => $"Name='{e.Name}'").ToList();
+                _logger.LogInformation("[Combine]   total={Total}, samples: {Samples}", entries.Count, string.Join("; ", sampleNames));
+
+                // Check for replacement characters (encoding mismatch)
+                var garbled = entries.Where(e => !string.IsNullOrEmpty(e.Name) && e.Name.Contains('\ufffd')).ToList();
+                if (garbled.Any())
+                {
+                    _logger.LogWarning("[Combine]   found {Count} garbled names → trying next encoding", garbled.Count);
+                    extractErr = new InvalidOperationException($"Encoding mismatch: {garbled.Count} garbled names");
+                    continue;
+                }
+
+                var basePath = Path.GetFullPath(projectPath);
+                int dirCount = 0, fileCount = 0;
+                foreach (var entry in entries)
+                {
+                    var isDir = string.IsNullOrEmpty(entry.Name) || entry.FullName.EndsWith('/');
+                    var dest = Path.GetFullPath(Path.Combine(basePath, entry.FullName));
+                    if (!dest.StartsWith(basePath, StringComparison.OrdinalIgnoreCase))
+                        throw new InvalidOperationException($"路径遍历攻击: {entry.FullName}");
+
+                    if (isDir) { Directory.CreateDirectory(dest); dirCount++; continue; }
+
+                    var parentDir = Path.GetDirectoryName(dest);
+                    if (!string.IsNullOrEmpty(parentDir)) Directory.CreateDirectory(parentDir);
+                    entry.ExtractToFile(dest, true);
+                    fileCount++;
+                }
+                _logger.LogInformation("[Combine]   done: {Dirs} dirs, {Files} files", dirCount, fileCount);
+                extractErr = null;
+                break;
             }
+            catch (Exception ex) when (ex is not InvalidOperationException iex || !iex.Message.Contains("路径遍历"))
+            {
+                _logger.LogWarning(ex, "[Combine]   try {Enc} failed: {Msg}", enc.EncodingName, ex.Message);
+                extractErr = ex;
+            }
+        }
+        if (extractErr != null)
+        {
+            _logger.LogError("[Combine] Step4 FAILED: {Err}", extractErr.Message);
+            throw new InvalidOperationException($"解压失败: {extractErr.Message}", extractErr);
         }
         _logger.LogInformation("[Combine] Step4 — extract OK");
 
