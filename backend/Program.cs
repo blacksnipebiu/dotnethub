@@ -89,12 +89,18 @@ if (!Directory.Exists(frontendRoot))
 if (Directory.Exists(frontendRoot))
 {
     var fileProvider = new Microsoft.Extensions.FileProviders.PhysicalFileProvider(frontendRoot);
-    
-    app.UseDefaultFiles(new DefaultFilesOptions { FileProvider = fileProvider });
-    app.UseStaticFiles(new StaticFileOptions { FileProvider = fileProvider });
-    
-    // SPA fallback — all non-API routes go to index.html
-    app.MapFallbackToFile("index.html", new StaticFileOptions { FileProvider = fileProvider });
+
+    // Static files + SPA fallback — only for non-API routes
+    app.MapWhen(ctx => !ctx.Request.Path.StartsWithSegments("/api"), spa =>
+    {
+        spa.UseDefaultFiles(new DefaultFilesOptions { FileProvider = fileProvider });
+        spa.UseStaticFiles(new StaticFileOptions { FileProvider = fileProvider });
+        spa.Run(async ctx =>
+        {
+            ctx.Response.ContentType = "text/html";
+            await ctx.Response.SendFileAsync(Path.Combine(frontendRoot, "index.html"));
+        });
+    });
 }
 
 app.Run();
