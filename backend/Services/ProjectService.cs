@@ -507,7 +507,7 @@ public class ProjectService
         {
             var info = new DirectoryInfo(dir);
             if (info.Name == ".git" || info.Name == "bin" || info.Name == "obj" || info.Name == "_chunks") continue;
-            _logger.LogDebug("[TREE]   dir: {Name}", info.Name);
+            _logger.LogInformation("[TREE]   dir: {Name}", info.Name);
             result.Add(new FileNode
             {
                 Name = info.Name,
@@ -520,7 +520,7 @@ public class ProjectService
         foreach (var file in Directory.GetFiles(rootPath))
         {
             var info = new FileInfo(file);
-            _logger.LogDebug("[TREE]   file: {Name} ({Size} bytes)", info.Name, info.Length);
+            _logger.LogInformation("[TREE]   file: {Name} ({Size} bytes)", info.Name, info.Length);
             result.Add(new FileNode
             {
                 Name = info.Name,

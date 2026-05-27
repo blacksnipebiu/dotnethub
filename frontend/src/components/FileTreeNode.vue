@@ -43,19 +43,20 @@ function formatSize(bytes: number): string {
 
 <template>
   <div v-for="node in nodes" :key="node.path">
-    <div
-      v-if="node.isDirectory"
-      class="tree-row"
-      :style="{ paddingLeft: (d * 16) + 'px' }"
-      @click="toggle(node.path)"
-    >
-      <span class="tree-arrow">{{ collapsed.has(node.path) ? '▶' : '▼' }}</span>
-      <span class="tree-icon">📁</span>
-      <span class="tree-name">{{ node.name }}</span>
-    </div>
-    <div v-if="!collapsed.has(node.path) && node.children">
-      <FileTreeNode :nodes="node.children" :depth="d + 1" />
-    </div>
+    <template v-if="node.isDirectory">
+      <div
+        class="tree-row"
+        :style="{ paddingLeft: (d * 16) + 'px' }"
+        @click="toggle(node.path)"
+      >
+        <span class="tree-arrow">{{ collapsed.has(node.path) ? '▶' : '▼' }}</span>
+        <span class="tree-icon">📁</span>
+        <span class="tree-name">{{ node.name }}</span>
+      </div>
+      <div v-if="!collapsed.has(node.path) && node.children">
+        <FileTreeNode :nodes="node.children" :depth="d + 1" />
+      </div>
+    </template>
     <div
       v-else
       class="tree-row tree-file"
