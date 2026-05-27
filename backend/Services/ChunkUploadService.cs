@@ -91,13 +91,23 @@ public class ChunkUploadService
         catch (Exception ex) { _logger.LogError(ex, "[Combine] Step3 FAILED"); throw; }
         _logger.LogInformation("[Combine] Step3 — read {ByteCount} bytes OK", zipBytes.Length);
         
-        // Step 4: Extract with UTF-8 encoding
+        // Step 4: Extract with UTF-8 encoding, safe extraction
         _logger.LogInformation("[Combine] Step4 — extracting with UTF-8 encoding");
         using (var ms = new MemoryStream(zipBytes))
         using (var archive = new ZipArchive(ms, ZipArchiveMode.Read, true, Encoding.UTF8))
         {
             _logger.LogInformation("[Combine]   entries={Count}", archive.Entries.Count);
-            archive.ExtractToDirectory(projectPath, true);
+            var basePath = Path.GetFullPath(projectPath);
+            foreach (var entry in archive.Entries)
+            {
+                if (string.IsNullOrEmpty(entry.Name)) continue;
+                var dest = Path.GetFullPath(Path.Combine(basePath, entry.FullName));
+                if (!dest.StartsWith(basePath, StringComparison.OrdinalIgnoreCase))
+                    throw new InvalidOperationException($"路径遍历攻击: {entry.FullName}");
+                var dir = Path.GetDirectoryName(dest);
+                if (!string.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir);
+                entry.ExtractToFile(dest, true);
+            }
         }
         _logger.LogInformation("[Combine] Step4 — extract OK");
 

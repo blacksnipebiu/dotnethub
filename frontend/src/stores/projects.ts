@@ -57,6 +57,14 @@ export const useProjectsStore = defineStore('projects', () => {
     projects.value = projects.value.filter(p => p.id !== id)
   }
 
+  async function uploadFiles(id: number, files: FileList | File[], mode = 'overwrite') {
+    const formData = new FormData()
+    for (const file of Array.from(files)) {
+      formData.append('files', file)
+    }
+    await api.post(`/projects/${id}/upload?mode=${mode}`, formData)
+  }
+
   async function buildProject(id: number) {
     await api.post(`/projects/${id}/build`)
   }
@@ -75,6 +83,6 @@ export const useProjectsStore = defineStore('projects', () => {
   }
 
   return { projects, loading, fetchProjects, createProject, updateProject, 
-           deleteProject, buildProject, deployProject, stopProject,
+           deleteProject, uploadFiles, buildProject, deployProject, stopProject,
            getFileTree }
 })

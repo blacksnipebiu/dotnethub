@@ -123,6 +123,92 @@ public class ProjectService
         return true;
     }
     
+    public async Task<bool> UploadFiles(int id, IFormFileCollection files, int userId, string userRole, string mode = "overwrite")
+    {
+        var project = await _db.Projects.FindAsync(id);
+        if (project == null) return false;
+        if (project.UserId != userId && userRole != "admin")
+            throw new UnauthorizedAccessException("Not authorized");
+
+        if (files == null || files.Count == 0)
+            throw new InvalidOperationException("没有选择任何文件");
+
+        var extractPath = project.StoragePath;
+        var fullPath = Path.GetFullPath(extractPath);
+
+        if (mode == "delete" && Directory.Exists(extractPath))
+            ClearDirectory(extractPath);
+        else
+            Directory.CreateDirectory(extractPath);
+
+        foreach (var file in files)
+        {
+            if (file.Length == 0) continue;
+            if (file.FileName.EndsWith(".zip", StringComparison.OrdinalIgnoreCase))
+                await ExtractZipAsync(file, extractPath);
+            else
+                await SaveSingleFileAsync(file, extractPath);
+        }
+
+        project.UpdatedAt = DateTime.UtcNow;
+        await _db.SaveChangesAsync();
+        return true;
+    }
+
+    private async Task ExtractZipAsync(IFormFile file, string extractPath)
+    {
+        var encodingsToTry = new[] { Encoding.UTF8, Encoding.GetEncoding(936) };
+        byte[] zipBytes;
+        using (var ms = new MemoryStream())
+        {
+            await file.CopyToAsync(ms);
+            zipBytes = ms.ToArray();
+        }
+
+        Exception? lastException = null;
+        foreach (var encoding in encodingsToTry)
+        {
+            try
+            {
+                using var zipMs = new MemoryStream(zipBytes);
+                using var archive = new ZipArchive(zipMs, ZipArchiveMode.Read, true, encoding);
+
+                foreach (var entry in archive.Entries)
+                {
+                    if (string.IsNullOrEmpty(entry.Name)) continue;
+                    var destPath = Path.Combine(extractPath, entry.FullName);
+                    var fullDest = Path.GetFullPath(destPath);
+                    if (!fullDest.StartsWith(Path.GetFullPath(extractPath), StringComparison.OrdinalIgnoreCase))
+                        throw new InvalidOperationException($"路径遍历攻击: {entry.FullName}");
+
+                    var destDir = Path.GetDirectoryName(fullDest);
+                    if (!string.IsNullOrEmpty(destDir)) Directory.CreateDirectory(destDir);
+                    entry.ExtractToFile(fullDest, true);
+                }
+                return;
+            }
+            catch (Exception ex) { lastException = ex; }
+        }
+        throw new InvalidOperationException($"解压失败: {lastException?.Message}", lastException);
+    }
+
+    private async Task SaveSingleFileAsync(IFormFile file, string extractPath)
+    {
+        var safeName = Path.GetFileName(file.FileName!);
+        if (safeName.Contains("..") || safeName.Contains('/') || safeName.Contains('\\'))
+            throw new InvalidOperationException($"非法文件名: {file.FileName}");
+        var filePath = Path.Combine(extractPath, safeName);
+        using var fs = new FileStream(filePath, FileMode.Create, FileAccess.Write, FileShare.None, 81920, useAsync: true);
+        await file.CopyToAsync(fs);
+    }
+
+    private void ClearDirectory(string path)
+    {
+        if (!Directory.Exists(path)) return;
+        foreach (var f in Directory.GetFiles(path)) { try { File.Delete(f); } catch { } }
+        foreach (var d in Directory.GetDirectories(path)) { try { Directory.Delete(d, true); } catch { } }
+    }
+
     public async Task<bool> Build(int id, int userId, string userRole)
     {
         var project = await _db.Projects.FindAsync(id);
