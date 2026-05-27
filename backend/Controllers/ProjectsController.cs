@@ -172,12 +172,21 @@ public class ProjectsController : ControllerBase
     
     [Authorize]
     [HttpGet("{id}/files")]
+    [Produces("application/json; charset=utf-8")]
     public async Task<ActionResult> GetFiles(int id)
     {
         var project = await _projectService.GetById(id);
         if (project == null) return NotFound();
         var tree = _projectService.GetFileTree(project.StoragePath);
         return Ok(tree);
+    }
+
+    [Authorize]
+    [HttpGet("{id}/logs")]
+    public async Task<ActionResult> GetLogs(int id, [FromQuery] int lines = 100)
+    {
+        var logs = await _projectService.GetLogs(id, lines);
+        return Ok(logs);
     }
     
     private int? GetUserId()

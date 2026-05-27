@@ -37,7 +37,10 @@ public class Project
     public bool IsPublic { get; set; } = false;
 
     [MaxLength(500)]
-    public string StartupArgs { get; set; } = "";  // custom dotnet run args, e.g. "--urls http://0.0.0.0:5000"
+    public string StartupArgs { get; set; } = "";
+
+    [MaxLength(1000)]
+    public string? ActualCommand { get; set; }
 }
 
 public class ProjectDto
@@ -55,6 +58,8 @@ public class ProjectDto
     public string? OwnerName { get; set; }
     public string StartupArgs { get; set; } = "";
     public string StoragePath { get; set; } = "";
+    public string? ActualCommand { get; set; }
+    public int? ProcessId { get; set; }
 }
 
 public class ProjectCreateRequest

@@ -232,10 +232,12 @@ public class ProjectService
             await Stop(id);
         
         project.Status = "running";
+        var (command, args) = GetDeployCommand(project);
+        project.ActualCommand = $"{command} {args}";
         
         try
         {
-            var (command, args) = GetDeployCommand(project);
+            var logPath = Path.Combine(project.StoragePath, "output.log");
             
             var process = new Process
             {
@@ -247,11 +249,27 @@ public class ProjectService
                     RedirectStandardOutput = true,
                     RedirectStandardError = true,
                     UseShellExecute = false
-                }
+                },
+                EnableRaisingEvents = true
             };
             
             process.Start();
             project.ProcessId = process.Id;
+            
+            // Start async log capture
+            _ = Task.Run(async () =>
+            {
+                using var fs = new FileStream(logPath, FileMode.Create, FileAccess.Write, FileShare.Read);
+                using var writer = new StreamWriter(fs) { AutoFlush = true };
+                var stdout = process.StandardOutput;
+                var stderr = process.StandardError;
+                var readTasks = new List<Task>
+                {
+                    Task.Run(async () => { while (true) { var line = await stdout.ReadLineAsync(); if (line == null) break; await writer.WriteLineAsync(line); } }),
+                    Task.Run(async () => { while (true) { var line = await stderr.ReadLineAsync(); if (line == null) break; await writer.WriteLineAsync(line); } })
+                };
+                await Task.WhenAll(readTasks);
+            });
             lock (RunningProcesses)
             {
                 RunningProcesses[id] = process;
@@ -363,10 +381,19 @@ public class ProjectService
         
         project.Status = "stopped";
         project.ProcessId = null;
+        project.ActualCommand = null;
         await _db.SaveChangesAsync();
         return true;
     }
     
+    public async Task<List<string>> GetLogs(int id, int lines = 100)
+    {
+        var project = await _db.Projects.FindAsync(id);
+        if (project == null) return new List<string>();
+        var logPath = Path.Combine(project.StoragePath, "output.log");
+        if (!File.Exists(logPath)) return new List<string>();
+        return (await File.ReadAllLinesAsync(logPath)).TakeLast(lines).ToList();
+    }
     private static ProjectDto Map(Project p) => new()
     {
         Id = p.Id,
@@ -381,7 +408,9 @@ public class ProjectService
         GitRepo = p.GitRepo,
         OwnerName = p.User?.Username,
         StartupArgs = p.StartupArgs,
-        StoragePath = p.StoragePath
+        StoragePath = p.StoragePath,
+        ActualCommand = p.ActualCommand,
+        ProcessId = p.ProcessId
     };
 
     public List<FileNode> GetFileTree(string rootPath)
