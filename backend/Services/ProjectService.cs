@@ -16,6 +16,7 @@ public class ProjectService
     private readonly ILogger<ProjectService> _logger;
     private readonly string _storageRoot;
     private static readonly Dictionary<int, Process> RunningProcesses = new();
+    private static readonly Dictionary<int, Task> LogTasks = new();
     
     public ProjectService(AppDbContext db, IConfiguration config, ILogger<ProjectService> logger)
     {
@@ -339,20 +340,34 @@ public class ProjectService
             process.Start();
             project.ProcessId = process.Id;
             
-            // Start async log capture
-            _ = Task.Run(async () =>
+            // Start async log capture with retry for file lock
+            var logTask = Task.Run(async () =>
             {
-                using var fs = new FileStream(logPath, FileMode.Create, FileAccess.Write, FileShare.Read);
-                using var writer = new StreamWriter(fs) { AutoFlush = true };
-                var stdout = process.StandardOutput;
-                var stderr = process.StandardError;
-                var readTasks = new List<Task>
+                // Retry up to 10 times if file is locked by previous deployment
+                for (int retry = 0; retry < 10; retry++)
                 {
-                    Task.Run(async () => { while (true) { var line = await stdout.ReadLineAsync(); if (line == null) break; await writer.WriteLineAsync(line); } }),
-                    Task.Run(async () => { while (true) { var line = await stderr.ReadLineAsync(); if (line == null) break; await writer.WriteLineAsync(line); } })
-                };
-                await Task.WhenAll(readTasks);
+                    try
+                    {
+                        using var fs = new FileStream(logPath, FileMode.Create, FileAccess.Write, FileShare.ReadWrite);
+                        using var writer = new StreamWriter(fs) { AutoFlush = true };
+                        var stdout = process.StandardOutput;
+                        var stderr = process.StandardError;
+                        var readTasks = new List<Task>
+                        {
+                            Task.Run(async () => { while (true) { var line = await stdout.ReadLineAsync(); if (line == null) break; await writer.WriteLineAsync(line); } }),
+                            Task.Run(async () => { while (true) { var line = await stderr.ReadLineAsync(); if (line == null) break; await writer.WriteLineAsync(line); } })
+                        };
+                        await Task.WhenAll(readTasks);
+                        return;
+                    }
+                    catch (IOException) when (retry < 9)
+                    {
+                        _logger.LogWarning("Log file {Path} locked, retry {Retry}/10...", logPath, retry + 1);
+                        await Task.Delay(500 * (retry + 1));
+                    }
+                }
             });
+            lock (LogTasks) { LogTasks[id] = logTask; }
             lock (RunningProcesses)
             {
                 RunningProcesses[id] = process;
@@ -465,6 +480,19 @@ public class ProjectService
         project.Status = "stopped";
         project.ProcessId = null;
         project.ActualCommand = null;
+        
+        // Wait for log capture task to finish
+        Task? logTask = null;
+        lock (LogTasks)
+        {
+            if (LogTasks.TryGetValue(id, out var t))
+            {
+                LogTasks.Remove(id);
+                logTask = t;
+            }
+        }
+        if (logTask != null) { try { await logTask.WaitAsync(TimeSpan.FromSeconds(5)); } catch { } }
+        
         await _db.SaveChangesAsync();
         return true;
     }
