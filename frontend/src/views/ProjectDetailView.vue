@@ -30,6 +30,7 @@ const editingPort = ref(false)
 const portDraft = ref(0)
 const activeTab = ref<'files' | 'logs'>('files')
 const showTree = ref(false)
+const confirmDelete = ref(false)
 
 // Upload progress
 const uploading = ref(false)
@@ -218,13 +219,14 @@ async function stop() {
 }
 
 async function del() {
-  if (!project.value || !confirm('确定要删除此项目吗？此操作不可恢复。')) return
+  if (!project.value) return
+  if (!confirmDelete.value) { confirmDelete.value = true; return }
   try {
     stopLogPolling()
     stopFileTreePolling()
     await store.deleteProject(project.value.id)
     router.push('/dashboard')
-  } catch (e: any) { error.value = '删除失败' }
+  } catch (e: any) { error.value = '删除失败'; confirmDelete.value = false }
 }
 
 async function saveStartupArgs() {
@@ -302,7 +304,12 @@ onUnmounted(() => { stopLogPolling(); stopFileTreePolling(); stopStatusPolling()
           <div v-if="canManage()" style="display:flex;gap:4px;flex-shrink:0">
             <button class="btn btn-success btn-sm" @click="deploy">🚀 部署</button>
             <button v-if="project.status === 'running'" class="btn btn-error btn-sm" @click="stop">⏹ 停止</button>
-            <button class="btn btn-error btn-sm" @click="del">🗑</button>
+            <template v-if="confirmDelete">
+              <span style="font-size:0.75rem;color:var(--error)">确认删除?</span>
+              <button class="btn btn-error btn-sm" @click="del">✓</button>
+              <button class="btn btn-outline btn-sm" @click="confirmDelete = false">✕</button>
+            </template>
+            <button v-else class="btn btn-outline btn-sm" @click="confirmDelete = true">🗑</button>
           </div>
         </div>
 
@@ -397,7 +404,7 @@ onUnmounted(() => { stopLogPolling(); stopFileTreePolling(); stopStatusPolling()
 
 <style scoped>
 .detail-layout { display: flex; gap: 16px; height: calc(100vh - 100px); overflow: hidden; }
-.left-col { width: 380px; min-width: 300px; flex-shrink: 0; overflow-y: auto; height: 100%; }
+.left-col { width: 380px; min-width: 300px; flex-shrink: 0; }
 .right-col { flex: 1; min-width: 0; height: 100%; overflow: hidden; }
 .tab-bar { display: flex; border-bottom: 2px solid var(--border); flex-shrink: 0; }
 .tab-btn { padding: 8px 16px; background: none; border: none; border-bottom: 2px solid transparent; color: var(--text-muted); font-size: 0.85rem; cursor: pointer; margin-bottom: -2px; }
