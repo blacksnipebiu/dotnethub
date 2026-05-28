@@ -290,16 +290,10 @@ onUnmounted(() => { stopLogPolling(); stopFileTreePolling(); stopStatusPolling()
   <div v-else class="detail-layout">
     <!-- ========== 左侧列 ========== -->
     <div class="left-col">
-      <!-- 标题 -->
-      <div>
-        <h1 class="page-title">{{ project.name }}</h1>
-        <p style="color:var(--text-muted)">{{ project.description || '暂无描述' }}</p>
-      </div>
-
-      <div v-if="message" class="alert alert-success mt-16">{{ message }}</div>
+      <div v-if="message" class="alert alert-success">{{ message }}</div>
 
       <!-- 🔧 操作按钮 -->
-      <div v-if="canManage()" class="card mt-16">
+      <div v-if="canManage()" class="card">
         <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">
           <input ref="fileInput" type="file" accept=".zip" style="display:none" @change="upload" />
           <button class="btn btn-outline btn-sm" :disabled="uploading" @click="fileInput?.click()">
@@ -323,6 +317,8 @@ onUnmounted(() => { stopLogPolling(); stopFileTreePolling(); stopStatusPolling()
 
       <!-- 状态卡片 -->
       <div class="card mt-16">
+        <h1 class="page-title" style="font-size:1.1rem;margin-bottom:2px">{{ project.name }}</h1>
+        <p style="color:var(--text-muted);font-size:0.8rem;margin-bottom:12px">{{ project.description || '暂无描述' }}</p>
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
           <strong>运行状态</strong>
           <button class="btn btn-outline btn-sm" @click="refreshStatus">🔄 刷新状态</button>
