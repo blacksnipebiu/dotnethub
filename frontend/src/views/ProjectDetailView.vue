@@ -1,3 +1,287 @@
+<script setup lang="ts">
+import { ref, onMounted, onUnmounted } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
+import { useProjectsStore, type Project } from '../stores/projects'
+import { useAuthStore } from '../stores/auth'
+import FileTreeNode from '../components/FileTreeNode.vue'
+import api from '../api'
+
+const CHUNK_SIZE = 2 * 1024 * 1024 // 2MB per chunk
+
+const route = useRoute()
+const router = useRouter()
+const store = useProjectsStore()
+const auth = useAuthStore()
+
+const project = ref<Project | null>(null)
+const fileTree = ref<any[]>([])
+const logs = ref<string[]>([])
+const loading = ref(true)
+const error = ref('')
+const message = ref('')
+const fileInput = ref<HTMLInputElement | null>(null)
+const logTimer = ref<number | null>(null)
+const fileTreeTimer = ref<number | null>(null)
+const statusTimer = ref<number | null>(null)
+
+const editingArgs = ref(false)
+const startupArgsDraft = ref('')
+const editingPort = ref(false)
+const portDraft = ref(0)
+const activeTab = ref<'files' | 'logs'>('files')
+const showTree = ref(false)
+
+// Upload progress
+const uploading = ref(false)
+const uploadProgress = ref(0)
+const uploadFileName = ref('')
+
+async function load() {
+  try {
+    const { data } = await api.get(`/projects/${route.params.id}`)
+    project.value = data
+    startupArgsDraft.value = data.startupArgs || ''
+    portDraft.value = data.port || 0
+    await loadLogs()
+  } catch (e: any) {
+    error.value = '项目不存在'
+  } finally {
+    loading.value = false
+  }
+}
+
+async function loadFileTree() {
+  try {
+    fileTree.value = await store.getFileTree(Number(route.params.id))
+  } catch (e) { fileTree.value = [] }
+}
+
+async function loadLogs() {
+  try {
+    const { data } = await api.get(`/projects/${route.params.id}/logs?lines=200`)
+    logs.value = Array.isArray(data) ? data : []
+  } catch (e) { logs.value = [] }
+}
+
+async function clearLogs() {
+  if (!project.value || !confirm('确定清除所有日志？')) return
+  try {
+    await api.post(`/projects/${project.value.id}/logs/clear`)
+    logs.value = []
+    message.value = '日志已清除'
+  } catch (e) { message.value = '清除失败' }
+}
+
+async function refreshStatus() {
+  if (!project.value) return
+  try {
+    const { data } = await api.post(`/projects/${project.value.id}/refresh-status`)
+    project.value = data
+    if (project.value.status === 'stopped') stopLogPolling()
+  } catch (e) { /* silently ignore */ }
+}
+
+function startStatusPolling() {
+  stopStatusPolling()
+  statusTimer.value = window.setInterval(refreshStatus, 15000)
+}
+function stopStatusPolling() {
+  if (statusTimer.value) { clearInterval(statusTimer.value); statusTimer.value = null }
+}
+
+function startLogPolling() {
+  stopLogPolling()
+  logTimer.value = window.setInterval(loadLogs, 3000)
+}
+function stopLogPolling() {
+  if (logTimer.value) { clearInterval(logTimer.value); logTimer.value = null }
+}
+function startFileTreePolling() {
+  stopFileTreePolling()
+  fileTreeTimer.value = window.setInterval(loadFileTree, 60000)
+}
+function stopFileTreePolling() {
+  if (fileTreeTimer.value) { clearInterval(fileTreeTimer.value); fileTreeTimer.value = null }
+}
+
+// ---- Chunked upload ----
+async function upload() {
+  if (!fileInput.value?.files?.length || !project.value) return
+  const file = fileInput.value.files[0]
+  uploadFileName.value = file.name
+
+  // Determine overwrite mode
+  let mode = 'overwrite'
+  try {
+    const { data } = await api.get(`/projects/${project.value.id}/has-files`)
+    if (data.hasFiles) {
+      const choice = confirm(
+        '该项目已有文件，请选择更新方式：\n\n【确定】= 覆盖更新  【取消】= 清空后更新'
+      )
+      mode = choice ? 'overwrite' : 'delete'
+    }
+  } catch (e) { /* default overwrite */ }
+
+  uploading.value = true
+  uploadProgress.value = 0
+
+  const totalChunks = Math.ceil(file.size / CHUNK_SIZE)
+
+  // If 'delete' mode, clear first
+  if (mode === 'delete') {
+    try { await api.post(`/projects/${project.value.id}/upload-chunk/clear`) } catch (e) {}
+  }
+
+  // Check resume status
+  let startChunk = 0
+  try {
+    const { data } = await api.get(`/projects/${project.value.id}/upload-status`, {
+      params: { fileName: file.name, totalChunks }
+    })
+    if (data.receivedChunks && data.receivedChunks.length > 0 && !data.complete) {
+      const r = confirm(`检测到未完成的上传，已接收 ${data.receivedChunks.length}/${totalChunks} 块。\n【确定】= 继续上传  【取消】= 重新开始`)
+      if (r) {
+        startChunk = Math.min(...data.receivedChunks) > 0 ? Math.min(...data.receivedChunks) : 0
+      }
+    }
+  } catch (e) { /* start from 0 */ }
+
+  for (let i = startChunk; i < totalChunks; i++) {
+    const start = i * CHUNK_SIZE
+    const end = Math.min(start + CHUNK_SIZE, file.size)
+    const chunk = file.slice(start, end)
+    
+    const formData = new FormData()
+    formData.append('file', chunk, file.name)
+    formData.append('chunkIndex', String(i))
+    formData.append('totalChunks', String(totalChunks))
+    formData.append('fileName', file.name)
+
+    try {
+      await api.post(`/projects/${project.value.id}/upload-chunk`, formData)
+      uploadProgress.value = Math.round(((i + 1) / totalChunks) * 100)
+    } catch (e: any) {
+      error.value = `上传失败（块 ${i + 1}/${totalChunks}）：${e.response?.data?.message || e.message}`
+      uploading.value = false
+      return
+    }
+  }
+
+  uploading.value = false
+  message.value = `上传完成！正在解压...`
+
+  // Trigger combine & extract
+  try {
+    await api.post(`/projects/${project.value.id}/upload-chunk/combine`, {
+      fileName: file.name,
+      totalChunks
+    })
+    message.value = '上传并解压成功！'
+    await loadFileTree()
+    showTree.value = true
+    startFileTreePolling()
+  } catch (e: any) {
+    error.value = '解压失败：' + (e.response?.data?.message || '')
+  }
+}
+
+async function build() {
+  if (!project.value) return
+  message.value = '正在构建...'
+  try {
+    await store.buildProject(project.value.id)
+    message.value = '构建成功！'
+    await load()
+  } catch (e: any) { message.value = '构建失败：' + (e.response?.data?.message || '') }
+}
+
+async function deploy() {
+  if (!project.value) return
+  message.value = '正在部署...'
+  try {
+    await store.deployProject(project.value.id)
+    message.value = '部署成功！'
+    await load()
+    startLogPolling()
+    startStatusPolling()
+  } catch (e: any) { message.value = '部署失败：' + (e.response?.data?.message || '') }
+}
+
+async function stop() {
+  if (!project.value) return
+  try {
+    await store.stopProject(project.value.id)
+    message.value = '已停止'
+    stopLogPolling()
+    await load()
+  } catch (e: any) { message.value = '停止失败' }
+}
+
+async function del() {
+  if (!project.value || !confirm('确定要删除此项目吗？此操作不可恢复。')) return
+  try {
+    stopLogPolling()
+    stopFileTreePolling()
+    await store.deleteProject(project.value.id)
+    router.push('/dashboard')
+  } catch (e: any) { error.value = '删除失败' }
+}
+
+async function saveStartupArgs() {
+  if (!project.value) return
+  try {
+    await store.updateProject(project.value.id, { startupArgs: startupArgsDraft.value })
+    project.value.startupArgs = startupArgsDraft.value
+    editingArgs.value = false
+    message.value = '启动参数已保存'
+  } catch (e: any) { error.value = '保存失败' }
+}
+
+async function savePort() {
+  if (!project.value || !portDraft.value) return
+  try {
+    await store.updateProject(project.value.id, { port: portDraft.value })
+    project.value.port = portDraft.value
+    editingPort.value = false
+    message.value = '端口已更新（下次部署生效）'
+  } catch (e: any) { error.value = '保存失败：' + (e.response?.data?.message || '') }
+}
+
+function formatSize(bytes: number): string {
+  if (!bytes || bytes <= 0) return '0 B'
+  if (bytes < 1024) return bytes + ' B'
+  if (bytes < 1048576) return (bytes / 1024).toFixed(1) + ' KB'
+  return (bytes / 1048576).toFixed(1) + ' MB'
+}
+
+function renderTree(nodes: any[], depth: number = 0): string {
+  let out = ''
+  for (const n of nodes) {
+    const indent = '  '.repeat(depth)
+    const name = n.name || '(未知)'
+    if (n.isDirectory) {
+      out += indent + '\u{1F4C1} ' + name + '/\n'
+      if (n.children && n.children.length > 0) out += renderTree(n.children, depth + 1)
+    } else {
+      out += indent + '\u{1F4C4} ' + name + '  (' + formatSize(n.size || 0) + ')\n'
+    }
+  }
+  return out
+}
+
+const canManage = () => {
+  if (!project.value) return false
+  return auth.user?.username === project.value.ownerName || auth.isAdmin()
+}
+
+onMounted(() => {
+  load().then(() => {
+    if (project.value?.status === 'running') { startLogPolling(); startStatusPolling() }
+  })
+})
+
+onUnmounted(() => { stopLogPolling(); stopFileTreePolling(); stopStatusPolling() })
+</script>
 <template>
   <div v-if="loading" style="text-align:center;padding:80px">加载中...</div>
   <div v-else-if="error" class="alert alert-error">{{ error }}</div>
