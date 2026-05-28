@@ -426,44 +426,26 @@ public class ProjectService
 
     private (string command, string args) GetDeployCommand(Project project)
     {
-        var dotnet = GetDotNetPath();
         var port = project.Port;
+        var startupArgs = (project.StartupArgs ?? "").Trim();
         
-        // If published package, find the main dll
-        if (IsPublishedPackage(project.StoragePath))
+        if (string.IsNullOrWhiteSpace(startupArgs))
+            throw new InvalidOperationException("请先设置启动命令（例如：dotnet MyApp.dll）");
+        
+        // Split into executable + arguments
+        var parts = startupArgs.Split(' ', 2, StringSplitOptions.RemoveEmptyEntries);
+        var cmd = parts[0];
+        var userArgs = parts.Length > 1 ? parts[1] : "";
+        
+        // Auto-append --urls with the configured port if not already present
+        if (!startupArgs.Contains("--urls"))
         {
-            var dllName = project.Name + ".dll";
-            // Try to find the project's main dll
-            var dlls = Directory.GetFiles(project.StoragePath, "*.dll", SearchOption.TopDirectoryOnly)
-                .Select(Path.GetFileName)
-                .Where(f => f != null && !f!.StartsWith("System.") && !f!.StartsWith("Microsoft.") && !f!.StartsWith("SQLite") && f != "hostfxr.dll" && f != "hostpolicy.dll")
-                .ToArray();
-            
-            if (dlls.Length > 0)
-            {
-                var mainDll = dlls.FirstOrDefault(d => d == dllName) ?? dlls[0];
-                var extraArgs = string.IsNullOrWhiteSpace(project.StartupArgs) 
-                    ? $"--urls http://0.0.0.0:{port}"
-                    : $"{project.StartupArgs}";
-                
-                // Check if user already included --urls
-                if (!extraArgs.Contains("--urls"))
-                    extraArgs = $"--urls http://0.0.0.0:{port} " + extraArgs;
-                
-                return (dotnet, $"{mainDll} {extraArgs}");
-            }
+            userArgs = string.IsNullOrEmpty(userArgs)
+                ? $"--urls http://0.0.0.0:{port}"
+                : $"{userArgs} --urls http://0.0.0.0:{port}";
         }
         
-        // Source project: dotnet run
-        var defaultArgs = $"--urls http://0.0.0.0:{project.Port}";
-        var args2 = !string.IsNullOrWhiteSpace(project.StartupArgs)
-            ? $"run -c Release {project.StartupArgs}"
-            : $"run -c Release {defaultArgs}";
-        
-        if (!args2.Contains("--urls"))
-            args2 = $"run -c Release {defaultArgs} " + args2.Replace("run -c Release ", "");
-        
-        return (dotnet, args2);
+        return (cmd, userArgs);
     }
     
     public async Task<bool> Stop(int id)

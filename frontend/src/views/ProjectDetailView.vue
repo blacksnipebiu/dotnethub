@@ -352,18 +352,21 @@ onUnmounted(() => { stopLogPolling(); stopFileTreePolling(); stopStatusPolling()
     <!-- 部署指令 -->
     <div class="card mt-16">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
-        <h3>⚙️ 部署指令</h3>
+        <h3>⚙️ 启动命令</h3>
         <button v-if="!editingArgs" class="btn btn-outline btn-sm" @click="editingArgs = true">编辑</button>
       </div>
+      <p style="color:var(--text-muted);font-size:0.82rem;margin-bottom:8px">
+        输入完整的启动命令，端口 <code>--urls http://0.0.0.0:{{ project.port }}</code> 会自动追加
+      </p>
       <div v-if="editingArgs">
-        <textarea v-model="startupArgsDraft" class="form-input" rows="2" placeholder="--urls http://0.0.0.0:5000" style="font-family:monospace;font-size:0.85rem"></textarea>
+        <textarea v-model="startupArgsDraft" class="form-input" rows="3" placeholder="dotnet MyApp.dll&#10;dotnet run -c Release&#10;node server.js&#10;./start.sh" style="font-family:monospace;font-size:0.85rem"></textarea>
         <div style="display:flex;gap:8px;margin-top:8px">
           <button class="btn btn-primary btn-sm" @click="saveStartupArgs">保存</button>
           <button class="btn btn-outline btn-sm" @click="editingArgs = false; startupArgsDraft = project.startupArgs || ''">取消</button>
         </div>
       </div>
       <div v-else>
-        <pre style="background:var(--code-bg);padding:10px;border-radius:6px;font-size:0.85rem;margin:0;overflow-x:auto">{{ startupArgsDraft || 'dotnet run -c Release --urls http://0.0.0.0:' + project.port }}</pre>
+        <pre style="background:var(--code-bg);padding:10px;border-radius:6px;font-size:0.85rem;margin:0;overflow-x:auto;color:var(--text)">{{ startupArgsDraft || '（未设置启动命令）' }}</pre>
       </div>
     </div>
 
