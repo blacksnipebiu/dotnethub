@@ -4,6 +4,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { useProjectsStore, type Project } from '../stores/projects'
 import { useAuthStore } from '../stores/auth'
 import FileTreeNode from '../components/FileTreeNode.vue'
+import ConfirmDialog from '../components/ConfirmDialog.vue'
 import api from '../api'
 
 const CHUNK_SIZE = 2 * 1024 * 1024 // 2MB per chunk
@@ -30,7 +31,8 @@ const editingPort = ref(false)
 const portDraft = ref(0)
 const activeTab = ref<'files' | 'logs'>('files')
 const showTree = ref(false)
-const confirmDelete = ref(false)
+const deldlg = ref(false)
+const clearlogsdlg = ref(false)
 
 // Upload progress
 const uploading = ref(false)
@@ -64,13 +66,18 @@ async function loadLogs() {
   } catch (e) { logs.value = [] }
 }
 
-async function clearLogs() {
-  if (!project.value || !confirm('确定清除所有日志？')) return
+function clearLogs() {
+  if (!project.value) return
+  clearlogsdlg.value = true
+}
+async function doClearLogs() {
+  if (!project.value) return
   try {
     await api.post(`/projects/${project.value.id}/logs/clear`)
     logs.value = []
     message.value = '日志已清除'
   } catch (e) { message.value = '清除失败' }
+  clearlogsdlg.value = false
 }
 
 async function refreshStatus() {
@@ -220,13 +227,12 @@ async function stop() {
 
 async function del() {
   if (!project.value) return
-  if (!confirmDelete.value) { confirmDelete.value = true; return }
   try {
     stopLogPolling()
     stopFileTreePolling()
     await store.deleteProject(project.value.id)
     router.push('/dashboard')
-  } catch (e: any) { error.value = '删除失败'; confirmDelete.value = false }
+  } catch (e: any) { error.value = '删除失败' }
 }
 
 async function saveStartupArgs() {
@@ -304,12 +310,7 @@ onUnmounted(() => { stopLogPolling(); stopFileTreePolling(); stopStatusPolling()
           <div v-if="canManage()" style="display:flex;gap:4px;flex-shrink:0">
             <button class="btn btn-success btn-sm" @click="deploy">🚀 部署</button>
             <button v-if="project.status === 'running'" class="btn btn-error btn-sm" @click="stop">⏹ 停止</button>
-            <template v-if="confirmDelete">
-              <span style="font-size:0.75rem;color:var(--error)">确认删除?</span>
-              <button class="btn btn-error btn-sm" @click="del">✓</button>
-              <button class="btn btn-outline btn-sm" @click="confirmDelete = false">✕</button>
-            </template>
-            <button v-else class="btn btn-outline btn-sm" @click="confirmDelete = true">🗑</button>
+            <button class="btn btn-error btn-sm" @click="deldlg = true">🗑</button>
           </div>
         </div>
 
@@ -400,6 +401,9 @@ onUnmounted(() => { stopLogPolling(); stopFileTreePolling(); stopStatusPolling()
       </div>
     </div>
   </div>
+
+  <ConfirmDialog :show="deldlg" title="删除项目" message="确定要删除此项目吗？此操作不可恢复。" @confirm="del(); deldlg = false" @cancel="deldlg = false" />
+  <ConfirmDialog :show="clearlogsdlg" title="清除日志" message="确定要清除所有运行日志吗？" @confirm="doClearLogs()" @cancel="clearlogsdlg = false" />
 </template>
 
 <style scoped>
