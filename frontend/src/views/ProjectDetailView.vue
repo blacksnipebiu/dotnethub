@@ -41,7 +41,6 @@ async function load() {
     project.value = data
     startupArgsDraft.value = data.startupArgs || ''
     portDraft.value = data.port || 0
-    await loadFileTree()
     await loadLogs()
   } catch (e: any) {
     error.value = '项目不存在'
@@ -61,6 +60,15 @@ async function loadLogs() {
     const { data } = await api.get(`/projects/${route.params.id}/logs?lines=200`)
     logs.value = Array.isArray(data) ? data : []
   } catch (e) { logs.value = [] }
+}
+
+async function clearLogs() {
+  if (!project.value || !confirm('确定清除所有日志？')) return
+  try {
+    await api.post(`/projects/${project.value.id}/logs/clear`)
+    logs.value = []
+    message.value = '日志已清除'
+  } catch (e) { message.value = '清除失败' }
 }
 
 async function refreshStatus() {
@@ -386,6 +394,7 @@ onUnmounted(() => { stopLogPolling(); stopFileTreePolling(); stopStatusPolling()
       <div v-if="activeTab === 'logs'" style="margin-top:12px">
         <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px">
           <button class="btn btn-outline btn-sm" @click="loadLogs">🔄 刷新日志</button>
+          <button class="btn btn-outline btn-sm" @click="clearLogs">🗑 清除</button>
           <span v-if="logTimer" style="font-size:0.75rem;color:var(--success)">● 自动刷新中</span>
           <span v-else style="font-size:0.75rem;color:var(--text-muted)">○ 自动刷新已停止</span>
         </div>

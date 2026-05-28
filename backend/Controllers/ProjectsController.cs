@@ -197,6 +197,17 @@ public class ProjectsController : ControllerBase
         var logs = await _projectService.GetLogs(id, lines);
         return Ok(logs);
     }
+
+    [Authorize]
+    [HttpPost("{id}/logs/clear")]
+    public async Task<ActionResult> ClearLogs(int id)
+    {
+        var project = await _projectService.GetById(id);
+        if (project == null) return NotFound();
+        var logPath = Path.Combine(project.StoragePath, "output.log");
+        try { System.IO.File.Delete(logPath); } catch { }
+        return Ok(new { message = "日志已清除" });
+    }
     
     [Authorize]
     [HttpPost("{id}/refresh-status")]
