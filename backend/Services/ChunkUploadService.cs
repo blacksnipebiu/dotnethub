@@ -1,31 +1,33 @@
-
-using System.IO.Compression;
 using System.Text;
 using DotNetHub.Server.Models;
+using SharpCompress.Archives;
+using SharpCompress.Archives.Zip;
+using SharpCompress.Common;
+using SharpCompress.Readers;
 
 namespace DotNetHub.Server.Services;
 
 public class ChunkUploadService
 {
     private readonly ILogger<ChunkUploadService> _logger;
-    
+
     public ChunkUploadService(ILogger<ChunkUploadService> logger)
     {
         _logger = logger;
     }
-    
+
     public async Task<ChunkStatus> SaveChunk(string projectPath, string fileName, int chunkIndex, int totalChunks, Stream chunkStream)
     {
         var chunkDir = Path.Combine(projectPath, "_chunks", SanitizeFileName(fileName));
         Directory.CreateDirectory(chunkDir);
-        
+
         var chunkFile = Path.Combine(chunkDir, $"part_{chunkIndex:D6}");
         using var fs = File.Create(chunkFile);
         await chunkStream.CopyToAsync(fs);
-        
+
         return GetStatus(projectPath, fileName, totalChunks);
     }
-    
+
     public ChunkStatus GetStatus(string projectPath, string fileName, int totalChunks)
     {
         var chunkDir = Path.Combine(projectPath, "_chunks", SanitizeFileName(fileName));
@@ -47,124 +49,183 @@ public class ChunkUploadService
             Complete = received.Count >= totalChunks
         };
     }
-    
+
     public async Task<string> CombineAndExtract(string projectPath, string fileName, string projectName, int totalChunks)
     {
-        _logger.LogInformation("[Combine] START — path={ProjectPath}, file={FileName}, chunks={TotalChunks}", 
+        _logger.LogInformation("[Combine] START — path={ProjectPath}, file={FileName}, chunks={TotalChunks}",
             projectPath, fileName, totalChunks);
-        
+
         var chunkDir = Path.Combine(projectPath, "_chunks", SanitizeFileName(fileName));
         var zipPath = Path.Combine(projectPath, projectName + ".zip");
-        
-        // Step 1: Combine chunks
+
+        // 1. 提前验证目录存在
+        if (!Directory.Exists(chunkDir))
+            throw new DirectoryNotFoundException($"分块目录不存在: {chunkDir}");
+
+        // 2. 合并分块
         _logger.LogInformation("[Combine] Step1 — combining {TotalChunks} chunks into {ZipPath}", totalChunks, zipPath);
-        try
-        {
-            using (var fs = File.Create(zipPath))
-            {
-                for (int i = 0; i < totalChunks; i++)
-                {
-                    var chunkFile = Path.Combine(chunkDir, $"part_{i:D6}");
-                    _logger.LogDebug("[Combine]   chunk {Index}: {ChunkFile} exists={Exists}", i, chunkFile, File.Exists(chunkFile));
-                    if (!File.Exists(chunkFile))
-                        throw new FileNotFoundException($"缺少分块 {i}");
-                    using var cf = File.OpenRead(chunkFile);
-                    await cf.CopyToAsync(fs);
-                }
-            }
-            _logger.LogInformation("[Combine] Step1 — combined OK, zip size={Size}", new FileInfo(zipPath).Length);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "[Combine] Step1 FAILED");
-            throw;
-        }
-        
-        // Step 2: Clean chunks
-        _logger.LogInformation("[Combine] Step2 — deleting chunk dir {ChunkDir}", chunkDir);
-        Directory.Delete(chunkDir, true);
-        
-        // Step 3: Read zip into memory
-        _logger.LogInformation("[Combine] Step3 — reading zip into memory");
-        byte[] zipBytes;
-        try { zipBytes = await File.ReadAllBytesAsync(zipPath); }
-        catch (Exception ex) { _logger.LogError(ex, "[Combine] Step3 FAILED"); throw; }
-        _logger.LogInformation("[Combine] Step3 — read {ByteCount} bytes OK", zipBytes.Length);
-        
-        // Step 4: Extract with encoding detection (UTF-8 → GBK fallback)
-        _logger.LogInformation("[Combine] Step4 — extracting with encoding detection");
-        var encodings = new[] { Encoding.UTF8, Encoding.GetEncoding(936) };
-        Exception? extractErr = null;
-        for (int ei = 0; ei < encodings.Length; ei++)
-        {
-            var enc = encodings[ei];
-            _logger.LogInformation("[Combine]   try encoding {Idx}: {Enc}", ei, enc.EncodingName);
-            try
-            {
-                using var ms = new MemoryStream(zipBytes);
-                using var archive = new ZipArchive(ms, ZipArchiveMode.Read, true, enc);
+        await CombineChunksAsync(chunkDir, zipPath, totalChunks);
 
-                var entries = archive.Entries.ToList();
-                var sampleNames = entries.Take(10).Select(e => $"Name='{e.Name}'").ToList();
-                _logger.LogInformation("[Combine]   total={Total}, samples: {Samples}", entries.Count, string.Join("; ", sampleNames));
+        // 3. 清理分块目录
+        _logger.LogInformation("[Combine] Step2 — cleaning chunks");
+        try { Directory.Delete(chunkDir, true); }
+        catch (Exception ex) { _logger.LogWarning(ex, "[Combine] Failed to delete chunk dir {ChunkDir}", chunkDir); }
 
-                // Check for replacement characters (encoding mismatch)
-                var garbled = entries.Where(e => !string.IsNullOrEmpty(e.Name) && e.Name.Contains('\ufffd')).ToList();
-                if (garbled.Any())
-                {
-                    _logger.LogWarning("[Combine]   found {Count} garbled names → trying next encoding", garbled.Count);
-                    extractErr = new InvalidOperationException($"Encoding mismatch: {garbled.Count} garbled names");
-                    continue;
-                }
+        // 4. 解压 ZIP（使用 SharpCompress）
+        _logger.LogInformation("[Combine] Step3 — extracting zip with SharpCompress");
+        await ExtractZipWithSharpCompressAsync(zipPath, projectPath);
 
-                var basePath = Path.GetFullPath(projectPath);
-                int dirCount = 0, fileCount = 0;
-                foreach (var entry in entries)
-                {
-                    var isDir = string.IsNullOrEmpty(entry.Name) || entry.FullName.EndsWith('/');
-                    var dest = Path.GetFullPath(Path.Combine(basePath, entry.FullName));
-                    if (!dest.StartsWith(basePath, StringComparison.OrdinalIgnoreCase))
-                        throw new InvalidOperationException($"路径遍历攻击: {entry.FullName}");
+        // 5. 清理临时 ZIP
+        _logger.LogInformation("[Combine] Step4 — cleaning zip");
+        try { File.Delete(zipPath); }
+        catch (Exception ex) { _logger.LogWarning(ex, "[Combine] Failed to delete zip {ZipPath}", zipPath); }
 
-                    if (isDir) { Directory.CreateDirectory(dest); dirCount++; continue; }
-
-                    var parentDir = Path.GetDirectoryName(dest);
-                    if (!string.IsNullOrEmpty(parentDir)) Directory.CreateDirectory(parentDir);
-                    entry.ExtractToFile(dest, true);
-                    fileCount++;
-                }
-                _logger.LogInformation("[Combine]   done: {Dirs} dirs, {Files} files", dirCount, fileCount);
-                extractErr = null;
-                break;
-            }
-            catch (Exception ex) when (ex is not InvalidOperationException iex || !iex.Message.Contains("路径遍历"))
-            {
-                _logger.LogWarning(ex, "[Combine]   try {Enc} failed: {Msg}", enc.EncodingName, ex.Message);
-                extractErr = ex;
-            }
-        }
-        if (extractErr != null)
-        {
-            _logger.LogError("[Combine] Step4 FAILED: {Err}", extractErr.Message);
-            throw new InvalidOperationException($"解压失败: {extractErr.Message}", extractErr);
-        }
-        _logger.LogInformation("[Combine] Step4 — extract OK");
-
-        // Step 5: Clean up zip
-        _logger.LogInformation("[Combine] Step5 — deleting zip {ZipPath}", zipPath);
-        File.Delete(zipPath);
-        
         _logger.LogInformation("[Combine] DONE successfully");
         return zipPath;
     }
-    
+
+    // 流式合并分块
+    private async Task CombineChunksAsync(string chunkDir, string zipPath, int totalChunks)
+    {
+        await using var fs = new FileStream(zipPath, FileMode.Create, FileAccess.Write, FileShare.None, 81920, useAsync: true);
+
+        for (int i = 0; i < totalChunks; i++)
+        {
+            var chunkFile = Path.Combine(chunkDir, $"part_{i:D6}");
+            _logger.LogDebug("[Combine]   chunk {Index}: {ChunkFile}", i, chunkFile);
+
+            if (!File.Exists(chunkFile))
+                throw new FileNotFoundException($"缺少分块 {i}", chunkFile);
+
+            await using var chunkStream = new FileStream(chunkFile, FileMode.Open, FileAccess.Read, FileShare.Read, 81920, useAsync: true);
+            await chunkStream.CopyToAsync(fs);
+        }
+
+        _logger.LogInformation("[Combine] Combined {TotalChunks} chunks, total size={Size} bytes", totalChunks, new FileInfo(zipPath).Length);
+    }
+
+    // 使用 SharpCompress 解压（支持 Deflate64 等多种压缩算法）
+    private async Task ExtractZipWithSharpCompressAsync(string zipPath, string extractPath)
+    {
+        Directory.CreateDirectory(extractPath);
+
+        var encodingsToTry = new[]
+        {
+            Encoding.UTF8,
+            Encoding.GetEncoding("GBK"),
+            Encoding.GetEncoding("BIG5"),
+            Encoding.Default
+        };
+
+        Exception? lastException = null;
+
+        foreach (var encoding in encodingsToTry)
+        {
+            _logger.LogInformation("[Combine]   trying encoding: {EncodingName}", encoding.EncodingName);
+
+            try
+            {
+                // 关键修复点 1：使用 ArchiveFactory.OpenArchive
+                using var archive = ArchiveFactory.OpenArchive(zipPath, new ReaderOptions
+                {
+                    LeaveStreamOpen = false,
+                    ArchiveEncoding = new ArchiveEncoding { Default = encoding }
+                });
+
+                var totalEntries = archive.Entries.Count();
+                var processedEntries = 0;
+                var dirCount = 0;
+                var fileCount = 0;
+
+                _logger.LogInformation("[Combine]   processing {TotalEntries} entries with {EncodingName}", totalEntries, encoding.EncodingName);
+
+                foreach (var entry in archive.Entries)
+                {
+                    processedEntries++;
+
+                    // 跳过无路径的条目
+                    if (string.IsNullOrEmpty(entry.Key)) continue;
+
+                    // 标准化路径分隔符
+                    var entryPath = entry.Key.Replace('\\', '/');
+                    var fullPath = Path.GetFullPath(Path.Combine(extractPath, entryPath));
+                    ValidatePathSecurity(fullPath, extractPath);
+
+                    if (entry.IsDirectory)
+                    {
+                        Directory.CreateDirectory(fullPath);
+                        dirCount++;
+                    }
+                    else
+                    {
+                        var destDir = Path.GetDirectoryName(fullPath);
+                        if (!string.IsNullOrEmpty(destDir))
+                            Directory.CreateDirectory(destDir);
+
+                        // 关键修复点 2：使用手动流式解压，兼容性最好
+                        using var entryStream = entry.OpenEntryStream();
+                        using var fileStream = new FileStream(fullPath, FileMode.Create, FileAccess.Write, FileShare.None, 81920, useAsync: true);
+                        await entryStream.CopyToAsync(fileStream);
+                        fileCount++;
+                    }
+
+                    if (processedEntries % 100 == 0)
+                    {
+                        _logger.LogDebug("[Combine]   processed {Processed}/{Total} entries", processedEntries, totalEntries);
+                    }
+                }
+
+                _logger.LogInformation("[Combine]   extracted: {DirCount} dirs, {FileCount} files", dirCount, fileCount);
+                _logger.LogInformation("[Combine]   encoding {EncodingName} succeeded", encoding.EncodingName);
+                return;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "[Combine]   encoding {EncodingName} failed: {Message}", encoding.EncodingName, ex.Message);
+                lastException = ex;
+                CleanDirectory(extractPath);
+            }
+        }
+
+        throw new InvalidOperationException($"无法解压 ZIP 文件（已尝试 {encodingsToTry.Length} 种编码）", lastException);
+    }
+
+    // 路径安全检查
+    private static void ValidatePathSecurity(string fullPath, string basePath)
+    {
+        var normalizedFull = Path.GetFullPath(fullPath);
+        var normalizedBase = Path.GetFullPath(basePath);
+
+        if (!normalizedFull.StartsWith(normalizedBase, StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException($"路径遍历攻击: {fullPath}");
+    }
+
+    // 清理目录
+    private void CleanDirectory(string path)
+    {
+        if (!Directory.Exists(path))
+            return;
+
+        try
+        {
+            foreach (var dir in Directory.GetDirectories(path))
+                Directory.Delete(dir, true);
+            foreach (var file in Directory.GetFiles(path))
+                File.Delete(file);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "[Combine]   failed to clean directory {Path}", path);
+        }
+    }
+
     public void CleanChunks(string projectPath)
     {
         var chunkRoot = Path.Combine(projectPath, "_chunks");
         if (Directory.Exists(chunkRoot))
             Directory.Delete(chunkRoot, true);
     }
-    
+
     private static string SanitizeFileName(string name)
     {
         foreach (var c in Path.GetInvalidFileNameChars())
