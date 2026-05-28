@@ -193,6 +193,7 @@ async function deploy() {
     message.value = '部署成功！'
     await load()
     startLogPolling()
+    startStatusPolling()
   } catch (e: any) { message.value = '部署失败：' + (e.response?.data?.message || '') }
 }
 

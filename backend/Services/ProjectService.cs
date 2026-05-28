@@ -510,7 +510,23 @@ public class ProjectService
         if (project == null) return new List<string>();
         var logPath = Path.Combine(project.StoragePath, "output.log");
         if (!File.Exists(logPath)) return new List<string>();
-        return (await File.ReadAllLinesAsync(logPath)).TakeLast(lines).ToList();
+        try
+        {
+            // Read with FileShare.ReadWrite to avoid locking with writer
+            await using var fs = new FileStream(logPath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+            using var sr = new StreamReader(fs);
+            var allLines = new List<string>();
+            while (await sr.ReadLineAsync() is { } line)
+                allLines.Add(line);
+            return allLines.TakeLast(lines).ToList();
+        }
+        catch (IOException)
+        {
+            // File locked — retry once after a brief delay
+            await Task.Delay(200);
+            try { return (await File.ReadAllLinesAsync(logPath)).TakeLast(lines).ToList(); }
+            catch { return new List<string> { "[日志文件被锁定，请稍后刷新]" }; }
+        }
     }
     private static ProjectDto Map(Project p) => new()
     {
