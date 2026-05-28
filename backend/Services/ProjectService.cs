@@ -313,7 +313,14 @@ public class ProjectService
             throw new UnauthorizedAccessException("Not authorized");
         
         if (project.Status == "running")
+        {
             await Stop(id);
+            await Task.Delay(1000); // Wait for file handles to release
+        }
+        
+        // Try to delete old log file
+        var logPath = Path.Combine(project.StoragePath, "output.log");
+        try { File.Delete(logPath); } catch { }
         
         project.Status = "running";
         var (command, args) = GetDeployCommand(project);
@@ -321,7 +328,6 @@ public class ProjectService
         
         try
         {
-            var logPath = Path.Combine(project.StoragePath, "output.log");
             
             var process = new Process
             {
@@ -366,6 +372,7 @@ public class ProjectService
                         await Task.Delay(500 * (retry + 1));
                     }
                 }
+                _logger.LogWarning("Log capture failed after 10 retries, continuing without log");
             });
             lock (LogTasks) { LogTasks[id] = logTask; }
             lock (RunningProcesses)
