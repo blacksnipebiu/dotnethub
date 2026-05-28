@@ -198,6 +198,38 @@ public class ProjectsController : ControllerBase
         return Ok(logs);
     }
     
+    [Authorize]
+    [HttpPost("{id}/refresh-status")]
+    public async Task<ActionResult> RefreshStatus(int id)
+    {
+        var project = await _projectService.GetById(id);
+        if (project == null) return NotFound();
+        
+        // If running, check if process still alive
+        if (project.Status == "running" && project.ProcessId.HasValue)
+        {
+            try
+            {
+                var proc = System.Diagnostics.Process.GetProcessById(project.ProcessId.Value);
+                if (proc.HasExited)
+                {
+                    await _projectService.Stop(id);
+                }
+                else
+                {
+                    proc.Dispose();
+                }
+            }
+            catch (ArgumentException)
+            {
+                await _projectService.Stop(id);
+            }
+        }
+        
+        var updated = await _projectService.GetById(id);
+        return Ok(updated);
+    }
+    
     private int? GetUserId()
     {
         var idClaim = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;

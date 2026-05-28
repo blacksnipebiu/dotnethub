@@ -47,6 +47,7 @@ builder.Services.AddAuthorization();
 builder.Services.AddScoped<AuthService>();
 builder.Services.AddScoped<ProjectService>();
 builder.Services.AddScoped<ChunkUploadService>();
+builder.Services.AddHostedService<ProcessMonitorService>();
 
 // CORS
 builder.Services.AddCors(options =>

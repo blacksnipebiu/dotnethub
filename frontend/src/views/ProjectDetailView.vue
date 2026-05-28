@@ -22,6 +22,7 @@ const message = ref('')
 const fileInput = ref<HTMLInputElement | null>(null)
 const logTimer = ref<number | null>(null)
 const fileTreeTimer = ref<number | null>(null)
+const statusTimer = ref<number | null>(null)
 
 const editingArgs = ref(false)
 const startupArgsDraft = ref('')
@@ -60,6 +61,23 @@ async function loadLogs() {
     const { data } = await api.get(`/projects/${route.params.id}/logs?lines=200`)
     logs.value = Array.isArray(data) ? data : []
   } catch (e) { logs.value = [] }
+}
+
+async function refreshStatus() {
+  if (!project.value) return
+  try {
+    const { data } = await api.post(`/projects/${project.value.id}/refresh-status`)
+    project.value = data
+    if (project.value.status === 'stopped') stopLogPolling()
+  } catch (e) { /* silently ignore */ }
+}
+
+function startStatusPolling() {
+  stopStatusPolling()
+  statusTimer.value = window.setInterval(refreshStatus, 15000)
+}
+function stopStatusPolling() {
+  if (statusTimer.value) { clearInterval(statusTimer.value); statusTimer.value = null }
 }
 
 function startLogPolling() {
@@ -247,11 +265,11 @@ const canManage = () => {
 
 onMounted(() => {
   load().then(() => {
-    if (project.value?.status === 'running') startLogPolling()
+    if (project.value?.status === 'running') { startLogPolling(); startStatusPolling() }
   })
 })
 
-onUnmounted(() => { stopLogPolling(); stopFileTreePolling() })
+onUnmounted(() => { stopLogPolling(); stopFileTreePolling(); stopStatusPolling() })
 </script>
 
 <template>
@@ -295,6 +313,10 @@ onUnmounted(() => { stopLogPolling(); stopFileTreePolling() })
 
     <!-- 状态卡片 -->
     <div class="card mt-16">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+        <strong>运行状态</strong>
+        <button class="btn btn-outline btn-sm" @click="refreshStatus">🔄 刷新状态</button>
+      </div>
       <div class="grid-3">
         <div>
           <strong>状态</strong><br>
