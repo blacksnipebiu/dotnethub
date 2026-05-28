@@ -287,135 +287,144 @@ onUnmounted(() => { stopLogPolling(); stopFileTreePolling(); stopStatusPolling()
   <div v-if="loading" style="text-align:center;padding:80px">加载中...</div>
   <div v-else-if="error" class="alert alert-error">{{ error }}</div>
   <div v-else-if="!project" style="text-align:center;padding:80px">未找到该项目</div>
-  <div v-else>
-    <!-- 标题 -->
-    <div style="display:flex;justify-content:space-between;align-items:start;flex-wrap:wrap;gap:16px">
+  <div v-else class="detail-layout">
+    <!-- ========== 左侧列 ========== -->
+    <div class="left-col">
+      <!-- 标题 -->
       <div>
         <h1 class="page-title">{{ project.name }}</h1>
         <p style="color:var(--text-muted)">{{ project.description || '暂无描述' }}</p>
       </div>
-    </div>
 
-    <div v-if="message" class="alert alert-success mt-16">{{ message }}</div>
+      <div v-if="message" class="alert alert-success mt-16">{{ message }}</div>
 
-    <!-- 🔧 操作按钮 -->
-    <div v-if="canManage()" class="card mt-16">
-      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
-        <input ref="fileInput" type="file" accept=".zip" style="display:none" @change="upload" />
-        <button class="btn btn-outline btn-sm" :disabled="uploading" @click="fileInput?.click()">
-          {{ uploading ? '上传中...' : '📁 上传文件' }}
-        </button>
-        <button class="btn btn-outline btn-sm" @click="build">🔨 构建</button>
-        <button class="btn btn-success btn-sm" @click="deploy">🚀 部署</button>
-        <button class="btn btn-error btn-sm" @click="stop">⏹ 停止</button>
-        <button class="btn btn-error btn-sm" @click="del" style="margin-left:auto">🗑 删除</button>
-      </div>
-      <!-- Upload progress -->
-      <div v-if="uploading" style="margin-top:12px">
-        <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">
-          <span style="font-size:0.85rem">上传中: {{ uploadFileName }}</span>
-          <span style="font-size:0.8rem;color:var(--primary);font-weight:600">{{ uploadProgress }}%</span>
+      <!-- 🔧 操作按钮 -->
+      <div v-if="canManage()" class="card mt-16">
+        <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">
+          <input ref="fileInput" type="file" accept=".zip" style="display:none" @change="upload" />
+          <button class="btn btn-outline btn-sm" :disabled="uploading" @click="fileInput?.click()">
+            {{ uploading ? '上传中...' : '📁 上传文件' }}
+          </button>
+          <button class="btn btn-outline btn-sm" @click="build">🔨 构建</button>
+          <button class="btn btn-success btn-sm" @click="deploy">🚀 部署</button>
+          <button class="btn btn-error btn-sm" @click="stop">⏹ 停止</button>
+          <button class="btn btn-error btn-sm" @click="del" style="margin-left:auto">🗑 删除</button>
         </div>
-        <div style="background:var(--border);height:6px;border-radius:3px;overflow:hidden">
-          <div :style="{ width: uploadProgress + '%', height: '100%', background: 'var(--primary)', transition: 'width 0.3s' }"></div>
+        <div v-if="uploading" style="margin-top:12px">
+          <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">
+            <span style="font-size:0.85rem">上传中: {{ uploadFileName }}</span>
+            <span style="font-size:0.8rem;color:var(--primary);font-weight:600">{{ uploadProgress }}%</span>
+          </div>
+          <div style="background:var(--border);height:6px;border-radius:3px;overflow:hidden">
+            <div :style="{ width: uploadProgress + '%', height:'100%', background:'var(--primary)', transition:'width 0.3s' }"></div>
+          </div>
         </div>
       </div>
-    </div>
 
-    <!-- 状态卡片 -->
-    <div class="card mt-16">
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
-        <strong>运行状态</strong>
-        <button class="btn btn-outline btn-sm" @click="refreshStatus">🔄 刷新状态</button>
-      </div>
-      <div class="grid-3">
-        <div>
-          <strong>状态</strong><br>
-          <span :class="'status-badge status-'+project.status" style="font-size:0.85rem">
-            {{ project.status === 'running' ? '运行中' : project.status === 'stopped' ? '已停止' : project.status === 'building' ? '构建中' : '异常' }}
-          </span>
+      <!-- 状态卡片 -->
+      <div class="card mt-16">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+          <strong>运行状态</strong>
+          <button class="btn btn-outline btn-sm" @click="refreshStatus">🔄 刷新状态</button>
         </div>
-        <div v-if="project.processId">
-          <strong>进程 PID</strong><br><code style="font-size:1rem">{{ project.processId }}</code>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+          <div><strong>状态</strong><br><span :class="'status-badge status-'+project.status" style="font-size:0.85rem">{{ project.status === 'running' ? '运行中' : project.status === 'stopped' ? '已停止' : project.status === 'building' ? '构建中' : '异常' }}</span></div>
+          <div v-if="project.processId"><strong>PID</strong><br><code>{{ project.processId }}</code></div>
+          <div><strong>端口</strong><br>
+            <span v-if="!editingPort">{{ project.port }}
+              <button v-if="canManage()" class="btn btn-outline btn-sm" style="margin-left:4px;padding:2px 6px;font-size:0.7rem" @click="editingPort = true; portDraft = project.port">改</button>
+            </span>
+            <span v-else style="display:flex;gap:4px;align-items:center;margin-top:4px">
+              <input v-model.number="portDraft" class="form-input" type="number" style="width:80px;padding:4px 8px" min="1024" max="65535" />
+              <button class="btn btn-primary btn-sm" style="padding:3px 8px;font-size:0.75rem" @click="savePort">✓</button>
+              <button class="btn btn-outline btn-sm" style="padding:3px 8px;font-size:0.75rem" @click="editingPort = false">✕</button>
+            </span>
+          </div>
         </div>
-        <div>
-          <strong>端口</strong><br>
-          <span v-if="!editingPort">{{ project.port }}
-            <button v-if="canManage()" class="btn btn-outline btn-sm" style="margin-left:4px;padding:2px 6px;font-size:0.7rem" @click="editingPort = true; portDraft = project.port">改</button>
-          </span>
-          <span v-else style="display:flex;gap:4px;align-items:center;margin-top:4px">
-            <input v-model.number="portDraft" class="form-input" type="number" style="width:80px;padding:4px 8px" min="1024" max="65535" />
-            <button class="btn btn-primary btn-sm" style="padding:3px 8px;font-size:0.75rem" @click="savePort">✓</button>
-            <button class="btn btn-outline btn-sm" style="padding:3px 8px;font-size:0.75rem" @click="editingPort = false">✕</button>
-          </span>
+        <div v-if="project.status === 'running' && project.actualCommand" style="margin-top:8px">
+          <strong>执行命令</strong>
+          <pre style="background:var(--code-bg);padding:6px 10px;border-radius:6px;font-size:0.8rem;margin:4px 0 0;overflow-x:auto">{{ project.actualCommand }}</pre>
+        </div>
+        <div v-if="project.status === 'running'" style="margin-top:6px;font-size:0.8rem;color:var(--text-muted)">
+          🌐 <a :href="'http://localhost:'+project.port" target="_blank">http://localhost:{{ project.port }}</a>
         </div>
       </div>
-      <div v-if="project.status === 'running' && project.actualCommand" style="margin-top:12px">
-        <strong>执行命令</strong>
-        <pre style="background:var(--code-bg);padding:8px 12px;border-radius:6px;font-size:0.82rem;margin:6px 0 0;overflow-x:auto">{{ project.actualCommand }}</pre>
-      </div>
-      <div v-if="project.status === 'running'" style="margin-top:8px;font-size:0.85rem;color:var(--text-muted)">
-        🌐 <a :href="'http://localhost:'+project.port" target="_blank">http://localhost:{{ project.port }}</a>
-      </div>
-    </div>
 
-    <!-- 部署指令 -->
-    <div class="card mt-16">
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
-        <h3>⚙️ 启动命令</h3>
-        <button v-if="!editingArgs" class="btn btn-outline btn-sm" @click="editingArgs = true">编辑</button>
-      </div>
-      <p style="color:var(--text-muted);font-size:0.82rem;margin-bottom:8px">
-        输入完整的启动命令，端口 <code>--urls http://0.0.0.0:{{ project.port }}</code> 会自动追加
-      </p>
-      <div v-if="editingArgs">
-        <textarea v-model="startupArgsDraft" class="form-input" rows="3" placeholder="dotnet MyApp.dll&#10;dotnet run -c Release&#10;node server.js&#10;./start.sh" style="font-family:monospace;font-size:0.85rem"></textarea>
-        <div style="display:flex;gap:8px;margin-top:8px">
-          <button class="btn btn-primary btn-sm" @click="saveStartupArgs">保存</button>
-          <button class="btn btn-outline btn-sm" @click="editingArgs = false; startupArgsDraft = project.startupArgs || ''">取消</button>
+      <!-- 启动命令 -->
+      <div class="card mt-16">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+          <h3 style="font-size:0.95rem">⚙️ 启动命令</h3>
+          <button v-if="!editingArgs" class="btn btn-outline btn-sm" @click="editingArgs = true">编辑</button>
         </div>
-      </div>
-      <div v-else>
-        <pre style="background:var(--code-bg);padding:10px;border-radius:6px;font-size:0.85rem;margin:0;overflow-x:auto;color:var(--text)">{{ startupArgsDraft || '（未设置启动命令）' }}</pre>
+        <p style="color:var(--text-muted);font-size:0.75rem;margin-bottom:6px">端口 <code>--urls :{{ project.port }}</code> 自动追加</p>
+        <div v-if="editingArgs">
+          <textarea v-model="startupArgsDraft" class="form-input" rows="2" placeholder="dotnet MyApp.dll" style="font-family:monospace;font-size:0.8rem"></textarea>
+          <div style="display:flex;gap:6px;margin-top:6px">
+            <button class="btn btn-primary btn-sm" @click="saveStartupArgs">保存</button>
+            <button class="btn btn-outline btn-sm" @click="editingArgs = false; startupArgsDraft = project.startupArgs || ''">取消</button>
+          </div>
+        </div>
+        <pre v-else style="background:var(--code-bg);padding:8px;border-radius:6px;font-size:0.8rem;margin:0;overflow-x:auto;color:var(--text)">{{ startupArgsDraft || '（未设置）' }}</pre>
       </div>
     </div>
 
-    <!-- TabGroup -->
-    <div class="card mt-16">
-      <div class="tab-bar">
-        <button :class="['tab-btn', activeTab === 'files' ? 'tab-active' : '']" @click="activeTab = 'files'">📂 文件结构</button>
-        <button :class="['tab-btn', activeTab === 'logs' ? 'tab-active' : '']" @click="activeTab = 'logs'">📋 运行日志</button>
-      </div>
+    <!-- ========== 右侧列: 文件 + 日志 ========== -->
+    <div class="right-col">
+      <div class="card" style="display:flex;flex-direction:column;height:100%;min-height:0">
+        <div class="tab-bar">
+          <button :class="['tab-btn', activeTab === 'files' ? 'tab-active' : '']" @click="activeTab = 'files'">📂 文件</button>
+          <button :class="['tab-btn', activeTab === 'logs' ? 'tab-active' : '']" @click="activeTab = 'logs'">📋 日志</button>
+        </div>
 
-      <div v-if="activeTab === 'files'" style="margin-top:12px">
-        <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px">
-          <button class="btn btn-outline btn-sm" @click="loadFileTree(); showTree = true">🔄 刷新文件树</button>
-          <button v-if="showTree && fileTree.length > 0" class="btn btn-outline btn-sm" @click="showTree = false">🙈 隐藏</button>
+        <!-- 文件结构 -->
+        <div v-if="activeTab === 'files'" style="margin-top:8px;display:flex;flex-direction:column;flex:1;min-height:0">
+          <div style="display:flex;gap:6px;align-items:center;margin-bottom:6px;flex-shrink:0">
+            <button class="btn btn-outline btn-sm" @click="loadFileTree(); showTree = true">🔄 刷新</button>
+            <button v-if="showTree && fileTree.length > 0" class="btn btn-outline btn-sm" @click="showTree = false">🙈 隐藏</button>
+          </div>
+          <div v-if="showTree && fileTree.length > 0" style="flex:1;overflow-y:auto;min-height:0;border:1px solid var(--border);border-radius:6px;padding:6px">
+            <FileTreeNode :nodes="fileTree" />
+          </div>
+          <div v-else-if="!showTree" style="flex:1;display:flex;align-items:center;justify-content:center;color:var(--text-muted)">点击「刷新」加载</div>
+          <div v-else style="flex:1;display:flex;align-items:center;justify-content:center;color:var(--text-muted)">暂无文件</div>
         </div>
-        <div v-if="showTree && fileTree.length > 0" style="max-height:400px;overflow-y:auto;border:1px solid var(--border);border-radius:8px;padding:8px">
-          <FileTreeNode :nodes="fileTree" />
-        </div>
-        <div v-else-if="!showTree" style="text-align:center;padding:40px;color:var(--text-muted)">点击「刷新文件树」加载</div>
-        <div v-else style="text-align:center;padding:40px;color:var(--text-muted)">暂无文件</div>
-      </div>
 
-      <div v-if="activeTab === 'logs'" style="margin-top:12px">
-        <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px">
-          <button class="btn btn-outline btn-sm" @click="loadLogs">🔄 刷新日志</button>
-          <button class="btn btn-outline btn-sm" @click="clearLogs">🗑 清除</button>
-          <span v-if="logTimer" style="font-size:0.75rem;color:var(--success)">● 自动刷新中</span>
-          <span v-else style="font-size:0.75rem;color:var(--text-muted)">○ 自动刷新已停止</span>
+        <!-- 运行日志 -->
+        <div v-if="activeTab === 'logs'" style="margin-top:8px;display:flex;flex-direction:column;flex:1;min-height:0">
+          <div style="display:flex;gap:6px;align-items:center;margin-bottom:6px;flex-shrink:0">
+            <button class="btn btn-outline btn-sm" @click="loadLogs">🔄 刷新</button>
+            <button class="btn btn-outline btn-sm" @click="clearLogs">🗑 清除</button>
+            <span v-if="logTimer" style="font-size:0.7rem;color:var(--success)">● 自动</span>
+            <span v-else style="font-size:0.7rem;color:var(--text-muted)">○ 已停</span>
+          </div>
+          <pre v-if="logs.length > 0" style="flex:1;overflow:auto;min-height:0;background:var(--code-bg);color:var(--text);padding:10px;border-radius:6px;font-size:0.8rem;line-height:1.4;margin:0;white-space:pre-wrap;word-break:break-all;font-family:monospace">{{ logs.join('\n') }}</pre>
+          <div v-else style="flex:1;display:flex;align-items:center;justify-content:center;color:var(--text-muted)">暂无日志</div>
         </div>
-        <pre v-if="logs.length > 0" style="background:var(--code-bg);color:var(--text);padding:16px;border-radius:8px;font-size:0.82rem;line-height:1.5;overflow-x:auto;margin:0;max-height:500px;overflow-y:auto;white-space:pre-wrap;word-break:break-all;font-family:monospace">{{ logs.join('\n') }}</pre>
-        <div v-else style="text-align:center;padding:40px;color:var(--text-muted)">暂无日志输出</div>
       </div>
     </div>
   </div>
 </template>
 
 <style scoped>
-.tab-bar { display: flex; border-bottom: 2px solid var(--border); }
-.tab-btn { padding: 10px 20px; background: none; border: none; border-bottom: 2px solid transparent; color: var(--text-muted); font-size: 0.9rem; cursor: pointer; margin-bottom: -2px; }
+.detail-layout {
+  display: flex;
+  gap: 16px;
+  align-items: flex-start;
+}
+.left-col {
+  width: 380px;
+  min-width: 300px;
+  flex-shrink: 0;
+}
+.right-col {
+  flex: 1;
+  min-width: 0;
+  height: calc(100vh - 100px);
+  position: sticky;
+  top: 80px;
+}
+.tab-bar { display: flex; border-bottom: 2px solid var(--border); flex-shrink: 0; }
+.tab-btn { padding: 8px 16px; background: none; border: none; border-bottom: 2px solid transparent; color: var(--text-muted); font-size: 0.85rem; cursor: pointer; margin-bottom: -2px; }
 .tab-btn:hover { color: var(--text); }
 .tab-active { color: var(--primary); border-bottom-color: var(--primary); font-weight: 600; }
 </style>
